@@ -3,7 +3,7 @@
 import math
 
 from tagger.tools.base import TOOL_VERSION, ToolResult
-from tagger.tools.sound_field_scene_tags.rir_estimator import (
+from tagger.tools.sound_field_scene.rir_estimator import (
     METHOD,
     RecRirError,
     validate_rir_payload,

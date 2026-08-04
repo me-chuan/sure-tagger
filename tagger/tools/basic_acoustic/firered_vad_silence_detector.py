@@ -10,9 +10,10 @@ import shutil
 import subprocess
 import tempfile
 
-from tagger.local_config import FIRERED_VAD_MODEL_DIR
+from tagger.local_config import FIRERED_VAD_MODEL_DIR, FIRERED_VAD_PYTHON
 from tagger.tools.acoustic_io import get_audio_info
 from tagger.tools.base import TOOL_VERSION, ToolResult
+from tagger.tools.subprocess_runner import run_subprocess_tool
 
 
 TOOL_NAME = "firered_vad_silence_detector"
@@ -27,7 +28,7 @@ class FireRedVadError(RuntimeError):
 
 
 class FireRedVadConfig:
-    """Fixed non-streaming FireRed VAD configuration used by v2."""
+    """Fixed non-streaming FireRed VAD configuration."""
 
     def __init__(
         self,
@@ -43,8 +44,10 @@ class FireRedVadConfig:
         chunk_max_frame=30000,
         normalize_to_16k_mono_pcm=True,
         merge_adjacent_silence_gap_sec=0.0,
+        subprocess_python=None,
     ):
         configured_model_dir = FIRERED_VAD_MODEL_DIR.strip()
+        configured_python = getattr(FIRERED_VAD_PYTHON, "strip", lambda: "")()
         selected_model_dir = model_dir or configured_model_dir
         self.model_dir = _resolve_model_dir(selected_model_dir)
         self.use_gpu = bool(use_gpu)
@@ -58,6 +61,9 @@ class FireRedVadConfig:
         self.chunk_max_frame = chunk_max_frame
         self.normalize_to_16k_mono_pcm = normalize_to_16k_mono_pcm
         self.merge_adjacent_silence_gap_sec = merge_adjacent_silence_gap_sec
+        self.subprocess_python = (
+            configured_python if subprocess_python is None else subprocess_python
+        )
 
     def cache_key(self):
         return (
@@ -73,6 +79,7 @@ class FireRedVadConfig:
             self.chunk_max_frame,
             self.normalize_to_16k_mono_pcm,
             self.merge_adjacent_silence_gap_sec,
+            self.subprocess_python,
         )
 
     def to_record(self):
@@ -90,6 +97,7 @@ class FireRedVadConfig:
             "normalize_to_16k_mono_pcm": self.normalize_to_16k_mono_pcm,
             "merge_adjacent_silence_gap_sec": self.merge_adjacent_silence_gap_sec,
             "supported_sample_rate_hz": SUPPORTED_SAMPLE_RATE_HZ,
+            "subprocess_python": self.subprocess_python,
         }
 
 
@@ -215,6 +223,25 @@ class FireRedVadClient:
         return FireRedVad.from_pretrained(str(model_dir), upstream_config)
 
 
+class FireRedVadSubprocessClient:
+    """Adapter that runs FireRed VAD in its configured Python environment."""
+
+    def __init__(self, config=None):
+        self.config = config or FireRedVadConfig()
+
+    def detect_speech_segments(self, audio_path, context=None):
+        result = run_subprocess_tool(
+            self.config.subprocess_python,
+            "firered_vad_detect",
+            {
+                "audio_path": str(audio_path),
+                "config": _subprocess_config(self.config),
+            },
+            context=context,
+        )
+        return result["speech_segments"]
+
+
 def _resolve_model_dir(configured_path):
     if not configured_path:
         return ""
@@ -240,7 +267,7 @@ def run(audio_path, duration_sec, context=None, config=None, client=None, **_kwa
         raise FireRedVadError("duration_sec must be positive before FireRed VAD")
 
     config = config or FireRedVadConfig()
-    client = client or FireRedVadClient(config)
+    client = client or _default_client(config)
     speech_segments = client.detect_speech_segments(audio_path, context=context)
     silence_segments = speech_segments_to_silence_segments(
         speech_segments,
@@ -248,7 +275,7 @@ def run(audio_path, duration_sec, context=None, config=None, client=None, **_kwa
         merge_adjacent_gap_sec=config.merge_adjacent_silence_gap_sec,
     )
     return ToolResult(
-        tag_path="signal.silence_segments",
+        tag_path="basic_acoustic.silence_segments",
         value=silence_segments,
         tool_name=TOOL_NAME,
         tool_version=TOOL_VERSION,
@@ -258,6 +285,30 @@ def run(audio_path, duration_sec, context=None, config=None, client=None, **_kwa
             "speech_segments": _round_segments(speech_segments),
         },
     )
+
+
+def _default_client(config):
+    if config.subprocess_python:
+        return FireRedVadSubprocessClient(config)
+    return FireRedVadClient(config)
+
+
+def _subprocess_config(config):
+    return {
+        "model_dir": config.model_dir,
+        "use_gpu": config.use_gpu,
+        "smooth_window_size": config.smooth_window_size,
+        "speech_threshold": config.speech_threshold,
+        "min_speech_frame": config.min_speech_frame,
+        "max_speech_frame": config.max_speech_frame,
+        "min_silence_frame": config.min_silence_frame,
+        "merge_silence_frame": config.merge_silence_frame,
+        "extend_speech_frame": config.extend_speech_frame,
+        "chunk_max_frame": config.chunk_max_frame,
+        "normalize_to_16k_mono_pcm": config.normalize_to_16k_mono_pcm,
+        "merge_adjacent_silence_gap_sec": config.merge_adjacent_silence_gap_sec,
+        "subprocess_python": "",
+    }
 
 
 def speech_segments_to_silence_segments(

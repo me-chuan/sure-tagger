@@ -23,6 +23,8 @@ Large or machine-local files are intentionally not tracked:
 - `data`: shared dataset symlink.
 - `outputs/`, `bridge/sure-tagger/outputs/`,
   `phase1_asr_samples/outputs/`: generated run outputs.
+- Rec-RIR waveform artifacts are written under the selected output directory's
+  `artifacts/rir/` subdirectory by default.
 - `api.txt`, `.env*`, `.codex/`: local secrets and private config.
 
 ## Quick Commands
@@ -30,20 +32,13 @@ Large or machine-local files are intentionally not tracked:
 Run tests:
 
 ```bash
-python3 -m pytest tests
+python3 -m unittest discover -s tests
 ```
 
-Run the acoustic phase-1 sample pipeline:
+Run the sample-level signal pipeline on the bundled sample manifest:
 
 ```bash
-python3 scripts/run_phase1_acoustic.py
-```
-
-Run signal pipelines on the bundled sample manifest:
-
-```bash
-python3 scripts/run_signal_v2.py
-python3 scripts/run_signal_v3.py
+python3 scripts/run_signal.py
 ```
 
 Model-backed tools require local model directories/checkpoints configured in

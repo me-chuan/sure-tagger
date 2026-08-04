@@ -1,7 +1,7 @@
-"""Tool for `signal.silence_ratio` derived from FireRed VAD silence segments."""
+"""Tool for `basic_acoustic.silence_ratio` derived from FireRed VAD silence segments."""
 
 from tagger.tools.base import ToolResult
-from tagger.tools.signal_tags.firered_vad_silence_detector import (
+from tagger.tools.basic_acoustic.firered_vad_silence_detector import (
     METHOD,
     validate_silence_segments,
 )
@@ -21,10 +21,9 @@ def run(silence_segments, duration_sec, **_kwargs):
     if ratio < 0 or ratio > 1:
         raise ValueError("silence_ratio is outside [0, 1]")
     return ToolResult(
-        tag_path="signal.silence_ratio",
+        tag_path="basic_acoustic.silence_ratio",
         value=round(ratio, 6),
         tool_name=TOOL_NAME,
         method=METHOD,
         evidence={"silence_segments": silence_segments, "duration_sec": duration_sec},
     )
-

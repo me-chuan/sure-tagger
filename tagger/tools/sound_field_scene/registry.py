@@ -1,8 +1,8 @@
 """Registry of sound-field and acoustic-scene tag tools."""
 
-from tagger.tools.sound_field_scene_tags import c50_estimator
-from tagger.tools.sound_field_scene_tags import rir_estimator
-from tagger.tools.sound_field_scene_tags import rt60_estimator
+from tagger.tools.sound_field_scene import c50_estimator
+from tagger.tools.sound_field_scene import rir_estimator
+from tagger.tools.sound_field_scene import rt60_estimator
 
 
 RECRIR_RIR_TOOL = {

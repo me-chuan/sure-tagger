@@ -1,32 +1,34 @@
-"""V3 sample-level signal and sound-field tagging pipeline.
+"""Sample-level signal and sound-field tagging pipeline.
 
-Input records must match the closed raw-only schema in AGENTS.md. Public output
-is tags-only and contains only tag values.
+Input records must match the closed raw-only schema in development.md. Public
+output is tags-only and contains only tag values.
 """
 
 import argparse
+import gzip
+import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any, Dict, List, Optional, Union
 
 from tagger.input_schema import InputSchemaError, validate_input_record
 from tagger.tools.base import ToolResult
-from tagger.tools.signal_tags.brouhaha_signal_estimator import BrouhahaConfig
-from tagger.tools.signal_tags.firered_vad_silence_detector import FireRedVadConfig
-from tagger.tools.signal_tags.registry import (
-    BROUHAHA_SIGNAL_TOOL,
+from tagger.tools.subprocess_runner import close_subprocess_workers
+from tagger.tools.basic_acoustic.brouhaha_signal_estimator import BrouhahaConfig
+from tagger.tools.basic_acoustic.firered_vad_silence_detector import FireRedVadConfig
+from tagger.tools.basic_acoustic.registry import (
+    AUDIO_PROBE_TOOL,
+    BROUHAHA_ACOUSTIC_TOOL,
     FIRERED_VAD_SILENCE_TOOL,
-    SIGNAL_PROBE_TOOL,
     SILENCE_RATIO_TOOL,
 )
-from tagger.tools.sound_field_scene_tags.registry import (
+from tagger.tools.sound_field_scene.registry import (
     C50_TOOL,
     RECRIR_RIR_TOOL,
     RT60_TOOL,
 )
-from tagger.tools.sound_field_scene_tags.rir_estimator import (
-    SUPPORTED_CHANNELS as RECRIR_SUPPORTED_CHANNELS,
-    SUPPORTED_SAMPLE_RATE_HZ as RECRIR_SUPPORTED_SAMPLE_RATE_HZ,
+from tagger.tools.sound_field_scene.rir_estimator import (
     RecRirConfig,
     validate_rir_payload,
 )
@@ -44,7 +46,6 @@ BASIC_ACOUSTIC_FIELDS = {
 
 SOUND_FIELD_SCENE_FIELDS = {
     "far_field": None,
-    "rir": None,
     "rt60": None,
     "c50": None,
     "music": None,
@@ -66,53 +67,57 @@ LANGUAGE_CONTENT_FIELDS = {
     "filler": None,
 }
 
-FINAL_PREFIX_BY_TOOL_PREFIX = {
-    "signal": "basic_acoustic",
-}
-
-
 def run_manifest(
     manifest_path,
     output_path,
     firered_vad_config=None,
     brouhaha_config=None,
     recrir_config=None,
+    artifact_dir=None,
 ):
-    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig]) -> Dict[str, Any]
+    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[Union[str, Path]]) -> Dict[str, Any]
     manifest = Path(manifest_path)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
+    artifact_root = _resolve_artifact_root(output, artifact_dir)
 
     count = 0
     internal_warning_count = 0
     tool_context = {}  # type: Dict[str, Any]
-    with manifest.open("r", encoding="utf-8") as source, output.open(
-        "w", encoding="utf-8"
-    ) as sink:
-        for row_index, line in enumerate(source, start=1):
-            if not line.strip():
-                continue
-            record = json.loads(line)
-            try:
-                internal = _tag_record_internal(
-                    record,
-                    manifest_dir=manifest.parent,
-                    firered_vad_config=firered_vad_config,
-                    brouhaha_config=brouhaha_config,
-                    recrir_config=recrir_config,
-                    tool_context=tool_context,
+    try:
+        with manifest.open("r", encoding="utf-8") as source, output.open(
+            "w", encoding="utf-8"
+        ) as sink:
+            for row_index, line in enumerate(source, start=1):
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                try:
+                    internal = _tag_record_internal(
+                        record,
+                        manifest_dir=manifest.parent,
+                        firered_vad_config=firered_vad_config,
+                        brouhaha_config=brouhaha_config,
+                        recrir_config=recrir_config,
+                        artifact_dir=artifact_root,
+                        artifact_record_index=row_index,
+                        tool_context=tool_context,
+                    )
+                except InputSchemaError as exc:
+                    raise InputSchemaError("line %s: %s" % (row_index, exc))
+                internal_warning_count += len(internal["warnings"])
+                sink.write(
+                    json.dumps(internal["tags"], ensure_ascii=False, sort_keys=True)
+                    + "\n"
                 )
-            except InputSchemaError as exc:
-                raise InputSchemaError("line %s: %s" % (row_index, exc))
-            internal_warning_count += len(internal["warnings"])
-            sink.write(
-                json.dumps(internal["tags"], ensure_ascii=False, sort_keys=True) + "\n"
-            )
-            count += 1
+                count += 1
+    finally:
+        close_subprocess_workers(tool_context)
 
     return {
         "manifest_path": str(manifest),
         "output_path": str(output),
+        "artifact_dir": str(artifact_root),
         "sample_count": count,
         "internal_warning_count": internal_warning_count,
     }
@@ -125,8 +130,9 @@ def tag_record(
     brouhaha_config=None,
     recrir_config=None,
     recrir_client=None,
+    artifact_dir=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Any) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Any, Optional[Union[str, Path]]) -> Dict[str, Any]
     return _tag_record_internal(
         record,
         manifest_dir,
@@ -134,6 +140,7 @@ def tag_record(
         brouhaha_config=brouhaha_config,
         recrir_config=recrir_config,
         recrir_client=recrir_client,
+        artifact_dir=artifact_dir,
     )["tags"]
 
 
@@ -144,9 +151,11 @@ def _tag_record_internal(
     brouhaha_config=None,
     recrir_config=None,
     recrir_client=None,
+    artifact_dir=None,
+    artifact_record_index=None,
     tool_context=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Any, Optional[Dict[str, Any]]) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]]) -> Dict[str, Any]
     validate_input_record(record)
     sample = record["sample"]
     sample_id = sample["sample_id"]
@@ -210,10 +219,12 @@ def _tag_record_internal(
             sample_id,
             recrir_config=recrir_config,
             recrir_client=recrir_client,
+            artifact_dir=artifact_dir,
+            artifact_record_index=artifact_record_index,
         )
 
     warnings.extend(
-        compare_native_metadata_signal_fields(sample, tags["basic_acoustic"])
+        compare_native_metadata_basic_acoustic_fields(sample, tags["basic_acoustic"])
     )
     warnings.extend(
         compare_native_metadata_sound_field_scene_fields(
@@ -221,8 +232,8 @@ def _tag_record_internal(
             tags["sound_field_scene"],
         )
     )
-    warnings.extend(audit_signal_tags(tags["basic_acoustic"]))
-    warnings.extend(audit_sound_field_scene_tags(tags["sound_field_scene"]))
+    warnings.extend(audit_basic_acoustic(tags["basic_acoustic"]))
+    warnings.extend(audit_sound_field_scene(tags["sound_field_scene"]))
 
     return {
         "tags": tags,
@@ -264,7 +275,6 @@ def resolve_audio_path(sample, manifest_dir):
 def apply_result(tags, internal_results, result):
     # type: (Dict[str, Any], List[Dict[str, Any]], ToolResult) -> None
     prefix, field = result.tag_path.split(".", 1)
-    prefix = FINAL_PREFIX_BY_TOOL_PREFIX.get(prefix, prefix)
     tags[prefix][field] = result.value
     internal_results.append(result.to_record())
 
@@ -278,17 +288,17 @@ def _run_signal_probe(
     sample_id,
 ):
     try:
-        results = SIGNAL_PROBE_TOOL["run"](audio_path, context=tool_context)
+        results = AUDIO_PROBE_TOOL["run"](audio_path, context=tool_context)
         for result in results:
             apply_result(tags, internal_results, result)
     except Exception as exc:  # noqa: BLE001 - tool failures become internal warnings.
         warnings.append(
             {
-                "type": "signal_tool_error",
+                "type": "basic_acoustic_tool_error",
                 "message": str(exc),
                 "sample_id": sample_id,
                 "audio_path": str(audio_path),
-                "tool_name": SIGNAL_PROBE_TOOL["tool_name"],
+                "tool_name": AUDIO_PROBE_TOOL["tool_name"],
             }
         )
         for field in ("duration_sec", "sample_rate_hz", "channels"):
@@ -370,7 +380,7 @@ def _run_brouhaha_tool(
     brouhaha_config=None,
 ):
     try:
-        results = BROUHAHA_SIGNAL_TOOL["run"](
+        results = BROUHAHA_ACOUSTIC_TOOL["run"](
             audio_path,
             context=tool_context,
             config=brouhaha_config,
@@ -384,7 +394,7 @@ def _run_brouhaha_tool(
                         "message": result.evidence.get("error", "invalid output"),
                         "sample_id": sample_id,
                         "audio_path": str(audio_path),
-                        "tool_name": BROUHAHA_SIGNAL_TOOL["tool_name"],
+                        "tool_name": BROUHAHA_ACOUSTIC_TOOL["tool_name"],
                         "field": result.tag_path,
                     }
                 )
@@ -395,7 +405,7 @@ def _run_brouhaha_tool(
                 "message": str(exc),
                 "sample_id": sample_id,
                 "audio_path": str(audio_path),
-                "tool_name": BROUHAHA_SIGNAL_TOOL["tool_name"],
+                "tool_name": BROUHAHA_ACOUSTIC_TOOL["tool_name"],
             }
         )
         tags["basic_acoustic"]["snr_db"] = None
@@ -411,27 +421,9 @@ def _run_recrir_tools(
     sample_id,
     recrir_config=None,
     recrir_client=None,
+    artifact_dir=None,
+    artifact_record_index=None,
 ):
-    sample_rate_hz = tags["basic_acoustic"]["sample_rate_hz"]
-    channels = tags["basic_acoustic"]["channels"]
-    if (
-        sample_rate_hz != RECRIR_SUPPORTED_SAMPLE_RATE_HZ
-        or channels != RECRIR_SUPPORTED_CHANNELS
-    ):
-        warnings.append(
-            {
-                "type": "invalid_audio_for_recrir",
-                "message": "Rec-RIR requires 16kHz mono audio",
-                "sample_id": sample_id,
-                "audio_path": str(audio_path),
-                "sample_rate_hz": sample_rate_hz,
-                "channels": channels,
-                "tool_name": RECRIR_RIR_TOOL["tool_name"],
-            }
-        )
-        _null_rir_related_tags(tags)
-        return
-
     try:
         rir_result = RECRIR_RIR_TOOL["run"](
             audio_path,
@@ -439,7 +431,7 @@ def _run_recrir_tools(
             config=recrir_config,
             client=recrir_client,
         )
-        apply_result(tags, internal_results, rir_result)
+        internal_results.append(rir_result.to_record())
         if rir_result.status != "estimated" or rir_result.value is None:
             warnings.append(
                 {
@@ -466,10 +458,31 @@ def _run_recrir_tools(
         _null_rir_related_tags(tags)
         return
 
+    rir_payload = rir_result.value
+    if artifact_dir is not None:
+        try:
+            artifact_path = write_rir_artifact(
+                rir_payload,
+                Path(artifact_dir) / "rir",
+                _artifact_sample_key(sample_id, artifact_record_index),
+            )
+            internal_results[-1]["evidence"]["artifact_path"] = str(artifact_path)
+            internal_results[-1]["evidence"]["artifact_format"] = "json.gz"
+        except Exception as exc:  # noqa: BLE001 - artifact failure is internal.
+            warnings.append(
+                {
+                    "type": "rir_artifact_write_error",
+                    "message": str(exc),
+                    "sample_id": sample_id,
+                    "audio_path": str(audio_path),
+                    "tool_name": RECRIR_RIR_TOOL["tool_name"],
+                }
+            )
+
     for tool, field in ((RT60_TOOL, "rt60"), (C50_TOOL, "c50")):
         try:
             result = tool["run"](
-                tags["sound_field_scene"]["rir"],
+                rir_payload,
                 context=tool_context,
             )
             apply_result(tags, internal_results, result)
@@ -488,12 +501,48 @@ def _run_recrir_tools(
 
 
 def _null_rir_related_tags(tags):
-    tags["sound_field_scene"]["rir"] = None
     tags["sound_field_scene"]["rt60"] = None
     tags["sound_field_scene"]["c50"] = None
 
 
-def compare_native_metadata_signal_fields(sample, observed_signal):
+def write_rir_artifact(rir_payload, artifact_dir, sample_key):
+    # type: (Dict[str, Any], Union[str, Path], str) -> Path
+    payload = validate_rir_payload(rir_payload)
+    directory = Path(artifact_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / ("%s.rir.json.gz" % _safe_artifact_stem(sample_key))
+    with gzip.open(str(path), "wt", encoding="utf-8") as sink:
+        json.dump(payload, sink, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return path
+
+
+def _resolve_artifact_root(output_path, artifact_dir):
+    # type: (Path, Optional[Union[str, Path]]) -> Path
+    if artifact_dir is not None:
+        return Path(artifact_dir)
+    return output_path.parent / "artifacts"
+
+
+def _artifact_sample_key(sample_id, record_index):
+    # type: (str, Optional[int]) -> str
+    if record_index is None:
+        return sample_id
+    return "%06d_%s" % (record_index, sample_id)
+
+
+def _safe_artifact_stem(value):
+    # type: (str) -> str
+    raw = str(value)
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._-")
+    if not stem:
+        stem = "sample"
+    if len(stem) > 160:
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+        stem = "%s_%s" % (stem[:147].rstrip("._-"), digest)
+    return stem
+
+
+def compare_native_metadata_basic_acoustic_fields(sample, observed_basic_acoustic):
     # type: (Dict[str, Any], Dict[str, Any]) -> List[Dict[str, Any]]
     native_metadata = sample.get("native_metadata", {})
     warnings = []  # type: List[Dict[str, Any]]
@@ -508,7 +557,7 @@ def compare_native_metadata_signal_fields(sample, observed_signal):
     ]
     for field, tolerance in comparisons:
         native_value = native_metadata.get(field)
-        observed_value = observed_signal.get(field)
+        observed_value = observed_basic_acoustic.get(field)
         if native_value is None or observed_value is None:
             continue
         if (
@@ -522,11 +571,11 @@ def compare_native_metadata_signal_fields(sample, observed_signal):
         if mismatch:
             warnings.append(
                 {
-                    "type": "native_metadata_signal_mismatch",
+                    "type": "native_metadata_basic_acoustic_mismatch",
                     "field": field,
                     "native_metadata_value": native_value,
                     "observed_value": observed_value,
-                    "message": "observed signal value differs from native metadata",
+                    "message": "observed basic acoustic value differs from native metadata",
                 }
             )
     return warnings
@@ -538,7 +587,6 @@ def compare_native_metadata_sound_field_scene_fields(sample, observed_sound_fiel
     warnings = []  # type: List[Dict[str, Any]]
     comparisons = [
         ("far_field", None),
-        ("rir", None),
         ("rt60", 1e-6),
         ("c50", 1e-6),
         ("music", None),
@@ -570,16 +618,16 @@ def compare_native_metadata_sound_field_scene_fields(sample, observed_sound_fiel
     return warnings
 
 
-def audit_signal_tags(signal):
+def audit_basic_acoustic(basic_acoustic):
     # type: (Dict[str, Any]) -> List[Dict[str, Any]]
     warnings = []  # type: List[Dict[str, Any]]
-    duration_sec = signal.get("duration_sec")
-    sample_rate_hz = signal.get("sample_rate_hz")
-    channels = signal.get("channels")
-    silence_ratio = signal.get("silence_ratio")
-    silence_segments = signal.get("silence_segments")
-    snr_db = signal.get("snr_db")
-    c50 = signal.get("c50")
+    duration_sec = basic_acoustic.get("duration_sec")
+    sample_rate_hz = basic_acoustic.get("sample_rate_hz")
+    channels = basic_acoustic.get("channels")
+    silence_ratio = basic_acoustic.get("silence_ratio")
+    silence_segments = basic_acoustic.get("silence_segments")
+    snr_db = basic_acoustic.get("snr_db")
+    c50 = basic_acoustic.get("c50")
 
     if duration_sec is not None and (
         isinstance(duration_sec, bool)
@@ -587,22 +635,28 @@ def audit_signal_tags(signal):
         or not _is_finite_number(duration_sec)
         or duration_sec < 0
     ):
-        signal["duration_sec"] = None
-        warnings.append({"type": "invalid_signal_value", "field": "duration_sec"})
+        basic_acoustic["duration_sec"] = None
+        warnings.append(
+            {"type": "invalid_basic_acoustic_value", "field": "duration_sec"}
+        )
 
     if sample_rate_hz is not None and (
         isinstance(sample_rate_hz, bool)
         or not isinstance(sample_rate_hz, int)
         or sample_rate_hz <= 0
     ):
-        signal["sample_rate_hz"] = None
-        warnings.append({"type": "invalid_signal_value", "field": "sample_rate_hz"})
+        basic_acoustic["sample_rate_hz"] = None
+        warnings.append(
+            {"type": "invalid_basic_acoustic_value", "field": "sample_rate_hz"}
+        )
 
     if channels is not None and (
         isinstance(channels, bool) or not isinstance(channels, int) or channels <= 0
     ):
-        signal["channels"] = None
-        warnings.append({"type": "invalid_signal_value", "field": "channels"})
+        basic_acoustic["channels"] = None
+        warnings.append(
+            {"type": "invalid_basic_acoustic_value", "field": "channels"}
+        )
 
     if silence_ratio is not None and (
         isinstance(silence_ratio, bool)
@@ -611,19 +665,24 @@ def audit_signal_tags(signal):
         or silence_ratio < 0
         or silence_ratio > 1
     ):
-        signal["silence_ratio"] = None
-        signal["silence_segments"] = None
-        warnings.append({"type": "invalid_signal_value", "field": "silence_ratio"})
+        basic_acoustic["silence_ratio"] = None
+        basic_acoustic["silence_segments"] = None
+        warnings.append(
+            {"type": "invalid_basic_acoustic_value", "field": "silence_ratio"}
+        )
 
     if silence_segments is not None:
         if not _is_valid_silence_segments(
             silence_segments,
-            signal.get("duration_sec"),
+            basic_acoustic.get("duration_sec"),
         ):
-            signal["silence_ratio"] = None
-            signal["silence_segments"] = None
+            basic_acoustic["silence_ratio"] = None
+            basic_acoustic["silence_segments"] = None
             warnings.append(
-                {"type": "invalid_signal_value", "field": "silence_segments"}
+                {
+                    "type": "invalid_basic_acoustic_value",
+                    "field": "silence_segments",
+                }
             )
 
     if snr_db is not None and (
@@ -631,21 +690,21 @@ def audit_signal_tags(signal):
         or not isinstance(snr_db, (int, float))
         or not _is_finite_number(snr_db)
     ):
-        signal["snr_db"] = None
-        warnings.append({"type": "invalid_signal_value", "field": "snr_db"})
+        basic_acoustic["snr_db"] = None
+        warnings.append({"type": "invalid_basic_acoustic_value", "field": "snr_db"})
 
     if c50 is not None and (
         isinstance(c50, bool)
         or not isinstance(c50, (int, float))
         or not _is_finite_number(c50)
     ):
-        signal["c50"] = None
-        warnings.append({"type": "invalid_signal_value", "field": "c50"})
+        basic_acoustic["c50"] = None
+        warnings.append({"type": "invalid_basic_acoustic_value", "field": "c50"})
 
     return warnings
 
 
-def audit_sound_field_scene_tags(sound_field_scene):
+def audit_sound_field_scene(sound_field_scene):
     # type: (Dict[str, Any]) -> List[Dict[str, Any]]
     warnings = []  # type: List[Dict[str, Any]]
 
@@ -655,18 +714,6 @@ def audit_sound_field_scene_tags(sound_field_scene):
             sound_field_scene[field] = None
             warnings.append(
                 {"type": "invalid_sound_field_scene_value", "field": field}
-            )
-
-    rir = sound_field_scene.get("rir")
-    if rir is not None:
-        try:
-            sound_field_scene["rir"] = validate_rir_payload(rir)
-        except Exception:  # noqa: BLE001 - invalid final value is nulled.
-            sound_field_scene["rir"] = None
-            sound_field_scene["rt60"] = None
-            sound_field_scene["c50"] = None
-            warnings.append(
-                {"type": "invalid_sound_field_scene_value", "field": "rir"}
             )
 
     rt60 = sound_field_scene.get("rt60")
@@ -738,8 +785,8 @@ def build_arg_parser():
     )
     parser.add_argument(
         "--output",
-        default="phase1_asr_samples/outputs/signal_v3_tags.jsonl",
-        help="Output tags-only JSONL path for v3 sample tags.",
+        default="phase1_asr_samples/outputs/sample_tags.jsonl",
+        help="Output tags-only JSONL path for sample tags.",
     )
     parser.add_argument(
         "--firered-vad-use-gpu",
@@ -756,6 +803,29 @@ def build_arg_parser():
         action="store_true",
         help="Use GPU in Rec-RIR config. Defaults to CPU when supported.",
     )
+    parser.add_argument(
+        "--firered-vad-python",
+        default=None,
+        help="Python executable for FireRed VAD subprocess. Defaults to local_config.py.",
+    )
+    parser.add_argument(
+        "--brouhaha-python",
+        default=None,
+        help="Python executable for Brouhaha subprocess. Defaults to local_config.py.",
+    )
+    parser.add_argument(
+        "--recrir-python",
+        default=None,
+        help="Python executable for Rec-RIR subprocess. Defaults to local_config.py.",
+    )
+    parser.add_argument(
+        "--artifact-dir",
+        default=None,
+        help=(
+            "Directory for non-public artifacts such as Rec-RIR waveforms. "
+            "Defaults to OUTPUT_PARENT/artifacts."
+        ),
+    )
     return parser
 
 
@@ -764,12 +834,15 @@ def main(argv=None):
     args = build_arg_parser().parse_args(argv)
     firered_vad_config = FireRedVadConfig(
         use_gpu=args.firered_vad_use_gpu,
+        subprocess_python=args.firered_vad_python,
     )
     brouhaha_config = BrouhahaConfig(
         use_gpu=args.brouhaha_use_gpu,
+        subprocess_python=args.brouhaha_python,
     )
     recrir_config = RecRirConfig(
         use_gpu=args.recrir_use_gpu,
+        subprocess_python=args.recrir_python,
     )
     summary = run_manifest(
         args.manifest,
@@ -777,6 +850,7 @@ def main(argv=None):
         firered_vad_config=firered_vad_config,
         brouhaha_config=brouhaha_config,
         recrir_config=recrir_config,
+        artifact_dir=args.artifact_dir,
     )
     public_summary = {
         "output_path": summary["output_path"],

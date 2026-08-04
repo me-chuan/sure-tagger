@@ -9,15 +9,17 @@ from numbers import Real
 from pathlib import Path
 import math
 import sys
+import tempfile
 
 from tagger.local_config import (
     RECRIR_CHECKPOINT_PATH,
     RECRIR_CONFIG_PATH,
     RECRIR_MODEL_VERSION,
+    RECRIR_PYTHON,
     RECRIR_REPO_DIR,
 )
-from tagger.tools.acoustic_io import get_audio_info
 from tagger.tools.base import TOOL_VERSION, ToolResult
+from tagger.tools.subprocess_runner import run_subprocess_tool
 
 
 TOOL_NAME = "rir_estimator"
@@ -46,6 +48,7 @@ class RecRirConfig:
         use_gpu=False,
         model_version=None,
         max_rir_seconds=MAX_RIR_SECONDS,
+        subprocess_python=None,
     ):
         configured_repo_dir = getattr(RECRIR_REPO_DIR, "strip", lambda: "")()
         configured_config_path = getattr(RECRIR_CONFIG_PATH, "strip", lambda: "")()
@@ -54,6 +57,7 @@ class RecRirConfig:
             "strip",
             lambda: "",
         )()
+        configured_python = getattr(RECRIR_PYTHON, "strip", lambda: "")()
         self.repo_dir = _resolve_project_path(repo_dir or configured_repo_dir)
         self.config_path = _resolve_project_path(
             config_path or configured_config_path
@@ -64,6 +68,9 @@ class RecRirConfig:
         self.use_gpu = bool(use_gpu)
         self.model_version = model_version or RECRIR_MODEL_VERSION
         self.max_rir_seconds = float(max_rir_seconds)
+        self.subprocess_python = (
+            configured_python if subprocess_python is None else subprocess_python
+        )
         if self.max_rir_seconds <= 0:
             raise RecRirError("max_rir_seconds must be positive")
 
@@ -75,6 +82,7 @@ class RecRirConfig:
             self.use_gpu,
             self.model_version,
             self.max_rir_seconds,
+            self.subprocess_python,
         )
 
     def to_record(self):
@@ -88,6 +96,7 @@ class RecRirConfig:
             "supported_sample_rate_hz": SUPPORTED_SAMPLE_RATE_HZ,
             "supported_channels": SUPPORTED_CHANNELS,
             "max_rir_seconds": self.max_rir_seconds,
+            "subprocess_python": self.subprocess_python,
         }
 
 
@@ -100,9 +109,10 @@ class RecRirClient:
 
     def estimate_rir(self, audio_path, context=None):
         runtime = self._get_runtime(context)
+        model_audio_path, cleanup_path = self._prepare_model_audio(audio_path)
         try:
             input_wav = runtime["transform"].load_wav(
-                str(audio_path),
+                str(model_audio_path),
                 SUPPORTED_SAMPLE_RATE_HZ,
             ).to(runtime["device"])
             rir = runtime["pim"].process(
@@ -113,6 +123,12 @@ class RecRirClient:
             )
         except Exception as exc:  # noqa: BLE001 - converted to internal warning.
             raise RecRirError("Rec-RIR inference failed") from exc
+        finally:
+            if cleanup_path is not None:
+                try:
+                    Path(cleanup_path).unlink()
+                except OSError:
+                    pass
 
         values = _to_python_value(rir)
         if isinstance(values, list) and values and isinstance(values[0], list):
@@ -212,11 +228,83 @@ class RecRirClient:
         if repo_dir not in sys.path:
             sys.path.insert(0, repo_dir)
 
+    def _prepare_model_audio(self, audio_path):
+        try:
+            import torchaudio
+            import torchaudio.functional as audio_functional
+        except ImportError as exc:
+            raise RecRirError(
+                "Rec-RIR audio preprocessing dependencies are not importable"
+            ) from exc
+
+        try:
+            info = torchaudio.info(str(audio_path), backend="soundfile")
+            if (
+                info.sample_rate == SUPPORTED_SAMPLE_RATE_HZ
+                and info.num_channels == SUPPORTED_CHANNELS
+            ):
+                return Path(audio_path), None
+
+            waveform, sample_rate_hz = torchaudio.load(
+                str(audio_path),
+                channels_first=True,
+                backend="soundfile",
+            )
+            if waveform.dim() == 1:
+                waveform = waveform.unsqueeze(0)
+            if waveform.size(0) > 1:
+                waveform = waveform.mean(dim=0, keepdim=True)
+            if sample_rate_hz != SUPPORTED_SAMPLE_RATE_HZ:
+                waveform = audio_functional.resample(
+                    waveform,
+                    sample_rate_hz,
+                    SUPPORTED_SAMPLE_RATE_HZ,
+                )
+            if waveform.numel() <= 0:
+                raise RecRirError("Rec-RIR input audio is empty after preprocessing")
+
+            handle = tempfile.NamedTemporaryFile(
+                prefix="tagger_recrir_",
+                suffix=".wav",
+                delete=False,
+            )
+            temp_path = Path(handle.name)
+            handle.close()
+            torchaudio.save(
+                str(temp_path),
+                waveform.cpu(),
+                SUPPORTED_SAMPLE_RATE_HZ,
+                backend="soundfile",
+            )
+            return temp_path, temp_path
+        except RecRirError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - converted to internal warning.
+            raise RecRirError("Rec-RIR audio preprocessing failed") from exc
+
+
+class RecRirSubprocessClient:
+    """Adapter that runs Rec-RIR in its configured Python environment."""
+
+    def __init__(self, config=None):
+        self.config = config or RecRirConfig()
+
+    def estimate_rir(self, audio_path, context=None):
+        result = run_subprocess_tool(
+            self.config.subprocess_python,
+            "recrir_estimate",
+            {
+                "audio_path": str(audio_path),
+                "config": _subprocess_config(self.config),
+            },
+            context=context,
+        )
+        return result["output"]
+
 
 def run(audio_path, context=None, config=None, client=None, **_kwargs):
     config = config or RecRirConfig()
-    _validate_audio_compatibility(audio_path, context)
-    client = client or RecRirClient(config)
+    client = client or _default_client(config)
     output = client.estimate_rir(audio_path, context=context)
     payload = normalize_rir_payload(
         output,
@@ -236,6 +324,24 @@ def run(audio_path, context=None, config=None, client=None, **_kwargs):
             "sample_count": len(payload["samples"]),
         },
     )
+
+
+def _default_client(config):
+    if config.subprocess_python:
+        return RecRirSubprocessClient(config)
+    return RecRirClient(config)
+
+
+def _subprocess_config(config):
+    return {
+        "repo_dir": config.repo_dir,
+        "config_path": config.config_path,
+        "checkpoint_path": config.checkpoint_path,
+        "use_gpu": config.use_gpu,
+        "model_version": config.model_version,
+        "max_rir_seconds": config.max_rir_seconds,
+        "subprocess_python": "",
+    }
 
 
 def normalize_rir_payload(payload, max_samples=None):
@@ -284,19 +390,6 @@ def _parse_rir_payload(payload, max_samples=None, normalize_peak=False):
         "sample_rate_hz": sample_rate_hz,
         "samples": [round(float(value), ROUND_DIGITS) for value in normalized],
     }
-
-
-def _validate_audio_compatibility(audio_path, context=None):
-    info = get_audio_info(audio_path, context)
-    if info.sample_rate_hz != SUPPORTED_SAMPLE_RATE_HZ:
-        raise RecRirError(
-            "Rec-RIR requires %s Hz audio, got %s Hz"
-            % (SUPPORTED_SAMPLE_RATE_HZ, info.sample_rate_hz)
-        )
-    if info.channels != SUPPORTED_CHANNELS:
-        raise RecRirError(
-            "Rec-RIR requires mono audio, got %s channels" % info.channels
-        )
 
 
 def _require_finite_number(value, path):

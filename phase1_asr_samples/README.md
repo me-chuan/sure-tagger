@@ -5,7 +5,7 @@ This folder contains copied representative samples from the shared `data` tree.
 ## Files
 
 - `audio/*.wav`: copied audio files for local testing.
-- `manifest.jsonl`: raw-only input records aligned with `AGENTS.md` (`corpus` + `sample`).
+- `manifest.jsonl`: raw-only input records aligned with `development.md` (`corpus` + `sample`).
 - `kaldi/text`: extracted original utterance ids and transcript strings.
 - `kaldi/utt2spk`: extracted original utterance ids and speaker ids.
 - `kaldi/wav.scp`: local wav mapping for the 7 samples that have ASR transcripts.

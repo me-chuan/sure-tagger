@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Compare FireRed VAD and Brouhaha VAD silence segments.
 
-This diagnostic script is not the v3 tags-only pipeline. The public v3
-signal.silence_segments field remains FireRed-only.
+This diagnostic script is not the public tags-only pipeline. The public
+basic_acoustic.silence_segments field remains FireRed-only.
 """
 
 from pathlib import Path
@@ -16,19 +16,19 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tagger.input_schema import InputSchemaError, validate_input_record  # noqa: E402
-from tagger.pipelines.signal_v2 import resolve_audio_path  # noqa: E402
+from tagger.pipelines.signal import resolve_audio_path  # noqa: E402
 from tagger.tools.acoustic_io import get_audio_info  # noqa: E402
-from tagger.tools.signal_tags.brouhaha_signal_estimator import BrouhahaConfig  # noqa: E402
-from tagger.tools.signal_tags.brouhaha_vad_silence_detector import (  # noqa: E402
+from tagger.tools.basic_acoustic.brouhaha_signal_estimator import BrouhahaConfig  # noqa: E402
+from tagger.tools.basic_acoustic.brouhaha_vad_silence_detector import (  # noqa: E402
     TOOL_NAME as BROUHAHA_VAD_TOOL_NAME,
     run as run_brouhaha_vad_silence_detector,
 )
-from tagger.tools.signal_tags.firered_vad_silence_detector import (  # noqa: E402
+from tagger.tools.basic_acoustic.firered_vad_silence_detector import (  # noqa: E402
     TOOL_NAME as FIRERED_VAD_TOOL_NAME,
     FireRedVadConfig,
     run as run_firered_vad_silence_detector,
 )
-from tagger.tools.signal_tags.silence_ratio_calculator import (  # noqa: E402
+from tagger.tools.basic_acoustic.silence_ratio_calculator import (  # noqa: E402
     run as run_silence_ratio,
 )
 

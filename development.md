@@ -13,7 +13,7 @@
 | 分组 | 字段 |
 | --- | --- |
 | `basic_acoustic` | `duration_sec`、`sample_rate_hz`、`channels`、`silence_segments`、`silence_ratio`、`snr_db`、`c50` |
-| `sound_field_scene` | `far_field`、`rir`、`rt60`、`c50`、`music`、`sound` |
+| `sound_field_scene` | `far_field`、`rt60`、`c50`、`music`、`sound` |
 | `speaker` | `multi_speaker`、`speaker_change`、`speaker_overlap` |
 | `language_content` | `topic`、`language`、`word_count`、`punctuation`、`repetition`、`filler` |
 
@@ -87,7 +87,6 @@
   },
   "sound_field_scene": {
     "far_field": null,
-    "rir": null,
     "rt60": null,
     "c50": null,
     "music": null,
@@ -112,6 +111,7 @@
 约束：
 
 - 最终输出不得包含 raw input、`sample_id`、工具标识、方法、状态、来源、证据、置信度、warning、rationale、prompt、模型名或审计结论。
+- Rec-RIR 生成的 RIR 波形不得进入公开输出；pipeline 只公开由该波形计算出的 `sound_field_scene.rt60` 和 `sound_field_scene.c50`，波形保存为内部 artifact。
 - 字段缺失、无法可靠判断或对应程序输出非法时，字段值必须为 `null`。
 - 同名字段如果位于不同路径，按不同 tag 处理。例如 `basic_acoustic.c50` 和 `sound_field_scene.c50` 不得跨字段复制，除非 registry 明确登记同一程序同时产出两个字段。
 

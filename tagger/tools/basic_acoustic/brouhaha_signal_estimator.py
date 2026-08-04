@@ -14,9 +14,11 @@ import sys
 from tagger.local_config import (
     BROUHAHA_MODEL_PATH,
     BROUHAHA_MODEL_VERSION,
+    BROUHAHA_PYTHON,
     BROUHAHA_REPO_DIR,
 )
 from tagger.tools.base import TOOL_VERSION, ToolResult
+from tagger.tools.subprocess_runner import run_subprocess_tool
 
 
 TOOL_NAME = "brouhaha_signal_estimator"
@@ -33,7 +35,7 @@ class BrouhahaError(RuntimeError):
 
 
 class BrouhahaConfig:
-    """Fixed Brouhaha configuration used by the v3 signal pipeline."""
+    """Fixed Brouhaha configuration used by the signal pipeline."""
 
     def __init__(
         self,
@@ -42,14 +44,19 @@ class BrouhahaConfig:
         use_gpu=False,
         aggregation=DEFAULT_AGGREGATION,
         model_version=None,
+        subprocess_python=None,
     ):
         configured_model_path = getattr(BROUHAHA_MODEL_PATH, "strip", lambda: "")()
         configured_repo_dir = getattr(BROUHAHA_REPO_DIR, "strip", lambda: "")()
+        configured_python = getattr(BROUHAHA_PYTHON, "strip", lambda: "")()
         self.model_path = _resolve_model_path(model_path or configured_model_path)
         self.repo_dir = _resolve_repo_dir(repo_dir or configured_repo_dir)
         self.use_gpu = bool(use_gpu)
         self.aggregation = aggregation
         self.model_version = model_version or BROUHAHA_MODEL_VERSION
+        self.subprocess_python = (
+            configured_python if subprocess_python is None else subprocess_python
+        )
         if self.aggregation != DEFAULT_AGGREGATION:
             raise BrouhahaError("Brouhaha aggregation must be fixed to mean")
 
@@ -60,6 +67,7 @@ class BrouhahaConfig:
             self.use_gpu,
             self.aggregation,
             self.model_version,
+            self.subprocess_python,
         )
 
     def to_record(self):
@@ -70,9 +78,10 @@ class BrouhahaConfig:
             "model_version": self.model_version,
             "use_gpu": self.use_gpu,
             "aggregation": self.aggregation,
+            "subprocess_python": self.subprocess_python,
             "output_field_mapping": {
-                "snr": "signal.snr_db",
-                "c50": "signal.c50",
+                "snr": "basic_acoustic.snr_db",
+                "c50": "basic_acoustic.c50",
             },
         }
 
@@ -174,25 +183,61 @@ class BrouhahaClient:
             sys.path.insert(0, str(repo_dir))
 
 
+class BrouhahaSubprocessClient:
+    """Adapter that runs Brouhaha in its configured Python environment."""
+
+    def __init__(self, config=None):
+        self.config = config or BrouhahaConfig()
+
+    def estimate(self, audio_path, context=None):
+        result = run_subprocess_tool(
+            self.config.subprocess_python,
+            "brouhaha_estimate",
+            {
+                "audio_path": str(audio_path),
+                "config": _subprocess_config(self.config),
+            },
+            context=context,
+        )
+        return result["output"]
+
+
 def run(audio_path, context=None, config=None, client=None, **_kwargs):
     config = config or BrouhahaConfig()
-    client = client or BrouhahaClient(config)
+    client = client or _default_client(config)
     output = client.estimate(audio_path, context=context)
 
     return [
         _build_result(
-            tag_path="signal.snr_db",
+            tag_path="basic_acoustic.snr_db",
             source_field="snr",
             output=output,
             config=config,
         ),
         _build_result(
-            tag_path="signal.c50",
+            tag_path="basic_acoustic.c50",
             source_field="c50",
             output=output,
             config=config,
         ),
     ]
+
+
+def _default_client(config):
+    if config.subprocess_python:
+        return BrouhahaSubprocessClient(config)
+    return BrouhahaClient(config)
+
+
+def _subprocess_config(config):
+    return {
+        "model_path": config.model_path,
+        "repo_dir": config.repo_dir,
+        "use_gpu": config.use_gpu,
+        "aggregation": config.aggregation,
+        "model_version": config.model_version,
+        "subprocess_python": "",
+    }
 
 
 def _build_result(tag_path, source_field, output, config):

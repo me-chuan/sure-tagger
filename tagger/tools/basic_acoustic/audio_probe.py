@@ -1,4 +1,4 @@
-"""Tool for v2 base signal tags read from the audio file."""
+"""Tool for basic acoustic tags read from the audio file."""
 
 from tagger.tools.acoustic_io import get_audio_info
 from tagger.tools.base import ToolResult
@@ -12,25 +12,24 @@ def run(audio_path, context=None, **_kwargs):
     evidence = info.base_evidence()
     return [
         ToolResult(
-            tag_path="signal.duration_sec",
+            tag_path="basic_acoustic.duration_sec",
             value=round(info.duration_sec, 6),
             tool_name=TOOL_NAME,
             method=info.method,
             evidence=evidence,
         ),
         ToolResult(
-            tag_path="signal.sample_rate_hz",
+            tag_path="basic_acoustic.sample_rate_hz",
             value=info.sample_rate_hz,
             tool_name=TOOL_NAME,
             method=info.method,
             evidence=evidence,
         ),
         ToolResult(
-            tag_path="signal.channels",
+            tag_path="basic_acoustic.channels",
             value=info.channels,
             tool_name=TOOL_NAME,
             method=info.method,
             evidence=evidence,
         ),
     ]
-

@@ -1,19 +1,19 @@
 """Diagnostic Brouhaha VAD silence segment extractor.
 
 This tool is only for comparing Brouhaha VAD boundaries against FireRed VAD.
-It must not be used as the v3 public source of signal.silence_segments.
+It must not be used as the public source of basic_acoustic.silence_segments.
 """
 
 import math
 from numbers import Real
 
 from tagger.tools.base import TOOL_VERSION, ToolResult
-from tagger.tools.signal_tags.brouhaha_signal_estimator import (
+from tagger.tools.basic_acoustic.brouhaha_signal_estimator import (
     BrouhahaClient,
     BrouhahaConfig,
     BrouhahaError,
 )
-from tagger.tools.signal_tags.firered_vad_silence_detector import (
+from tagger.tools.basic_acoustic.firered_vad_silence_detector import (
     speech_segments_to_silence_segments,
 )
 
@@ -47,7 +47,7 @@ def run(audio_path, duration_sec, context=None, config=None, client=None, **_kwa
             "raw_speech_segments": raw_speech_segments,
             "speech_segments": speech_segments,
             "boundary_postprocess": "clip_to_audio_duration",
-            "note": "diagnostic_only_not_v3_public_silence_source",
+            "note": "diagnostic_only_not_public_silence_source",
         },
     )
 
