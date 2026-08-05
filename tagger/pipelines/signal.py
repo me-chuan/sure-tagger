@@ -32,6 +32,18 @@ from tagger.tools.sound_field_scene.rir_estimator import (
     RecRirConfig,
     validate_rir_payload,
 )
+from tagger.tools.speaker.artifacts import write_speaker_artifact
+from tagger.tools.speaker.config import SpeakerLayerConfig, default_speaker_layer_config
+from tagger.tools.speaker.metrics import (
+    SpeakerMetricsConfig,
+    build_metadata_from_channel_activity,
+    build_metadata_from_timeline,
+)
+from tagger.tools.speaker.registry import (
+    CHANNEL_ACTIVITY_TOOL,
+    MOSS_DIARIZE_TOOL,
+    SPEAKER_METRICS_TOOL,
+)
 
 
 BASIC_ACOUSTIC_FIELDS = {
@@ -73,9 +85,12 @@ def run_manifest(
     firered_vad_config=None,
     brouhaha_config=None,
     recrir_config=None,
+    speaker_config=None,
+    moss_client=None,
+    channel_activity_client=None,
     artifact_dir=None,
 ):
-    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[Union[str, Path]]) -> Dict[str, Any]
+    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerLayerConfig], Any, Any, Optional[Union[str, Path]]) -> Dict[str, Any]
     manifest = Path(manifest_path)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -99,6 +114,9 @@ def run_manifest(
                         firered_vad_config=firered_vad_config,
                         brouhaha_config=brouhaha_config,
                         recrir_config=recrir_config,
+                        speaker_config=speaker_config,
+                        moss_client=moss_client,
+                        channel_activity_client=channel_activity_client,
                         artifact_dir=artifact_root,
                         artifact_record_index=row_index,
                         tool_context=tool_context,
@@ -129,17 +147,23 @@ def tag_record(
     firered_vad_config=None,
     brouhaha_config=None,
     recrir_config=None,
+    speaker_config=None,
     recrir_client=None,
+    moss_client=None,
+    channel_activity_client=None,
     artifact_dir=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Any, Optional[Union[str, Path]]) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerLayerConfig], Any, Any, Any, Optional[Union[str, Path]]) -> Dict[str, Any]
     return _tag_record_internal(
         record,
         manifest_dir,
         firered_vad_config=firered_vad_config,
         brouhaha_config=brouhaha_config,
         recrir_config=recrir_config,
+        speaker_config=speaker_config,
         recrir_client=recrir_client,
+        moss_client=moss_client,
+        channel_activity_client=channel_activity_client,
         artifact_dir=artifact_dir,
     )["tags"]
 
@@ -150,12 +174,15 @@ def _tag_record_internal(
     firered_vad_config=None,
     brouhaha_config=None,
     recrir_config=None,
+    speaker_config=None,
     recrir_client=None,
+    moss_client=None,
+    channel_activity_client=None,
     artifact_dir=None,
     artifact_record_index=None,
     tool_context=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]]) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerLayerConfig], Any, Any, Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]]) -> Dict[str, Any]
     validate_input_record(record)
     sample = record["sample"]
     sample_id = sample["sample_id"]
@@ -201,6 +228,20 @@ def _tag_record_internal(
             sample_id,
             firered_vad_config=firered_vad_config,
         )
+        _run_speaker_tools(
+            audio_path,
+            sample,
+            tool_context,
+            tags,
+            internal_results,
+            warnings,
+            sample_id,
+            speaker_config=speaker_config,
+            moss_client=moss_client,
+            channel_activity_client=channel_activity_client,
+            artifact_dir=artifact_dir,
+            artifact_record_index=artifact_record_index,
+        )
         _run_brouhaha_tool(
             audio_path,
             tool_context,
@@ -234,6 +275,7 @@ def _tag_record_internal(
     )
     warnings.extend(audit_basic_acoustic(tags["basic_acoustic"]))
     warnings.extend(audit_sound_field_scene(tags["sound_field_scene"]))
+    warnings.extend(audit_speaker(tags["speaker"]))
 
     return {
         "tags": tags,
@@ -368,6 +410,412 @@ def _run_silence_tools(
         )
         tags["basic_acoustic"]["silence_segments"] = None
         tags["basic_acoustic"]["silence_ratio"] = None
+
+
+def _run_speaker_tools(
+    audio_path,
+    sample,
+    tool_context,
+    tags,
+    internal_results,
+    warnings,
+    sample_id,
+    speaker_config=None,
+    moss_client=None,
+    channel_activity_client=None,
+    artifact_dir=None,
+    artifact_record_index=None,
+):
+    # type: (Path, Dict[str, Any], Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], str, Optional[SpeakerLayerConfig], Any, Any, Optional[Union[str, Path]], Optional[int]) -> None
+    duration_sec = tags["basic_acoustic"].get("duration_sec")
+    channels = tags["basic_acoustic"].get("channels")
+    if duration_sec is None or duration_sec <= 0:
+        warnings.append(
+            {
+                "type": "invalid_duration_for_speaker",
+                "message": "duration_sec must be positive before speaker tools",
+                "sample_id": sample_id,
+                "audio_path": str(audio_path),
+            }
+        )
+        _null_speaker_tags(tags)
+        return
+
+    config = speaker_config or default_speaker_layer_config(enable_moss=False)
+    target_units = _speaker_target_units_from_native_metadata(sample)
+    recording_id = _speaker_recording_id(sample, sample_id)
+    input_kind = _speaker_input_kind(sample, channels)
+    metrics_config = SpeakerMetricsConfig(
+        min_segment_duration_sec=config.channel_activity_config.min_segment_duration_sec,
+        merge_same_speaker_gap_sec=config.channel_activity_config.merge_gap_sec,
+    )
+    separated_channel_input = (
+        channels is not None
+        and channels > 1
+        and input_kind == "separated_headset_channels"
+    )
+    channel_candidate = config.enable_channel_activity and separated_channel_input
+    channel_error = None
+    moss_available = config.enable_moss or moss_client is not None
+
+    if separated_channel_input and moss_available and not config.prefer_channel_activity:
+        try:
+            _run_moss_merged_headset_speaker_route(
+                audio_path,
+                tool_context,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                duration_sec,
+                config,
+                metrics_config,
+                recording_id,
+                input_kind,
+                target_units,
+                moss_client,
+                artifact_dir,
+                artifact_record_index,
+            )
+            return
+        except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
+            warnings.append(
+                {
+                    "type": "moss_merged_headset_diarize_error",
+                    "message": str(exc),
+                    "sample_id": sample_id,
+                    "audio_path": str(audio_path),
+                    "tool_name": MOSS_DIARIZE_TOOL["tool_name"],
+                }
+            )
+
+    if channel_candidate:
+        try:
+            _run_channel_activity_speaker_route(
+                audio_path,
+                tool_context,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                duration_sec,
+                config,
+                metrics_config,
+                recording_id,
+                input_kind,
+                target_units,
+                channel_activity_client,
+                artifact_dir,
+                artifact_record_index,
+            )
+            return
+        except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
+            channel_error = exc
+            warnings.append(
+                {
+                    "type": "channel_activity_error",
+                    "message": str(exc),
+                    "sample_id": sample_id,
+                    "audio_path": str(audio_path),
+                    "tool_name": CHANNEL_ACTIVITY_TOOL["tool_name"],
+                }
+            )
+
+    if separated_channel_input and moss_available and config.prefer_channel_activity:
+        try:
+            _run_moss_merged_headset_speaker_route(
+                audio_path,
+                tool_context,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                duration_sec,
+                config,
+                metrics_config,
+                recording_id,
+                input_kind,
+                target_units,
+                moss_client,
+                artifact_dir,
+                artifact_record_index,
+            )
+            return
+        except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
+            warnings.append(
+                {
+                    "type": "moss_merged_headset_diarize_error",
+                    "message": str(exc),
+                    "sample_id": sample_id,
+                    "audio_path": str(audio_path),
+                    "tool_name": MOSS_DIARIZE_TOOL["tool_name"],
+                }
+            )
+
+    if not separated_channel_input and moss_available:
+        try:
+            _run_moss_speaker_route(
+                audio_path,
+                tool_context,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                duration_sec,
+                config,
+                metrics_config,
+                recording_id,
+                input_kind,
+                target_units,
+                moss_client,
+                artifact_dir,
+                artifact_record_index,
+            )
+            return
+        except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
+            warnings.append(
+                {
+                    "type": "moss_diarize_error",
+                    "message": str(exc),
+                    "sample_id": sample_id,
+                    "audio_path": str(audio_path),
+                    "tool_name": MOSS_DIARIZE_TOOL["tool_name"],
+                }
+            )
+
+    if channel_error is None and not moss_available:
+        warnings.append(
+            {
+                "type": "speaker_diarization_not_configured",
+                "message": "MOSS diarize is disabled and channel route did not apply",
+                "sample_id": sample_id,
+                "audio_path": str(audio_path),
+            }
+        )
+    _null_speaker_tags(tags)
+
+
+def _run_channel_activity_speaker_route(
+    audio_path,
+    tool_context,
+    tags,
+    internal_results,
+    warnings,
+    sample_id,
+    duration_sec,
+    config,
+    metrics_config,
+    recording_id,
+    input_kind,
+    target_units,
+    channel_activity_client,
+    artifact_dir,
+    artifact_record_index,
+):
+    channel_result = CHANNEL_ACTIVITY_TOOL["run"](
+        audio_path,
+        duration_sec=duration_sec,
+        context=tool_context,
+        config=config.channel_activity_config,
+        client=channel_activity_client,
+    )
+    internal_results.append(channel_result.to_record())
+    metadata = build_metadata_from_channel_activity(
+        channel_result.value,
+        duration_sec,
+        sample_id,
+        recording_id=recording_id,
+        input_kind=input_kind,
+        target_units=target_units,
+        config=metrics_config,
+    )
+    _write_speaker_metadata_artifact(
+        metadata,
+        internal_results,
+        warnings,
+        artifact_dir,
+        sample_id,
+        artifact_record_index,
+    )
+    for result in SPEAKER_METRICS_TOOL["run"](metadata):
+        apply_result(tags, internal_results, result)
+
+
+def _run_moss_merged_headset_speaker_route(
+    audio_path,
+    tool_context,
+    tags,
+    internal_results,
+    warnings,
+    sample_id,
+    duration_sec,
+    config,
+    metrics_config,
+    recording_id,
+    input_kind,
+    target_units,
+    moss_client,
+    artifact_dir,
+    artifact_record_index,
+):
+    moss_result = MOSS_DIARIZE_TOOL["run_merged_channels"](
+        audio_path,
+        duration_sec=duration_sec,
+        context=tool_context,
+        config=config.moss_config,
+        client=moss_client,
+    )
+    internal_results.append(moss_result.to_record())
+    metadata = build_metadata_from_timeline(
+        moss_result.value.get("segments", []),
+        duration_sec,
+        sample_id,
+        recording_id=recording_id,
+        input_kind=input_kind,
+        primary_route="moss_diarize_merged_headset",
+        target_units=target_units,
+        config=metrics_config,
+    )
+    _write_speaker_metadata_artifact(
+        metadata,
+        internal_results,
+        warnings,
+        artifact_dir,
+        sample_id,
+        artifact_record_index,
+    )
+    for result in SPEAKER_METRICS_TOOL["run"](metadata):
+        apply_result(tags, internal_results, result)
+
+
+def _run_moss_speaker_route(
+    audio_path,
+    tool_context,
+    tags,
+    internal_results,
+    warnings,
+    sample_id,
+    duration_sec,
+    config,
+    metrics_config,
+    recording_id,
+    input_kind,
+    target_units,
+    moss_client,
+    artifact_dir,
+    artifact_record_index,
+):
+    moss_result = MOSS_DIARIZE_TOOL["run"](
+        audio_path,
+        duration_sec=duration_sec,
+        context=tool_context,
+        config=config.moss_config,
+        client=moss_client,
+    )
+    internal_results.append(moss_result.to_record())
+    metadata = build_metadata_from_timeline(
+        moss_result.value.get("segments", []),
+        duration_sec,
+        sample_id,
+        recording_id=recording_id,
+        input_kind=input_kind,
+        primary_route="moss_diarize",
+        target_units=target_units,
+        config=metrics_config,
+    )
+    _write_speaker_metadata_artifact(
+        metadata,
+        internal_results,
+        warnings,
+        artifact_dir,
+        sample_id,
+        artifact_record_index,
+    )
+    for result in SPEAKER_METRICS_TOOL["run"](metadata):
+        apply_result(tags, internal_results, result)
+
+
+def _write_speaker_metadata_artifact(
+    metadata,
+    internal_results,
+    warnings,
+    artifact_dir,
+    sample_id,
+    artifact_record_index,
+):
+    evidence = {
+        "metadata_version": metadata.get("metadata_version"),
+        "primary_route": metadata.get("primary_route"),
+        "input_kind": metadata.get("input_kind"),
+    }
+    if artifact_dir is not None:
+        try:
+            artifact_path = write_speaker_artifact(
+                metadata,
+                Path(artifact_dir) / "speaker",
+                _artifact_sample_key(sample_id, artifact_record_index),
+                route=metadata.get("primary_route"),
+            )
+            evidence["artifact_path"] = str(artifact_path)
+            evidence["artifact_format"] = "json.gz"
+        except Exception as exc:  # noqa: BLE001 - artifact failure is internal.
+            warnings.append(
+                {
+                    "type": "speaker_artifact_write_error",
+                    "message": str(exc),
+                    "sample_id": sample_id,
+                }
+            )
+    internal_results.append(
+        ToolResult(
+            tag_path="speaker.metadata",
+            value=metadata,
+            tool_name="speaker_metadata_builder",
+            method="speaker_metadata_v0.1",
+            status="estimated",
+            confidence=1.0,
+            tool_type="derived",
+            evidence=evidence,
+        ).to_record()
+    )
+
+
+def _speaker_target_units_from_native_metadata(sample):
+    native_metadata = sample.get("native_metadata", {})
+    for key in ("target_units", "utterances"):
+        value = native_metadata.get(key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
+def _speaker_recording_id(sample, sample_id):
+    native_metadata = sample.get("native_metadata", {})
+    for key in ("recording_id", "meeting_id", "audio_id"):
+        value = native_metadata.get(key)
+        if value:
+            return str(value)
+    return sample_id
+
+
+def _speaker_input_kind(sample, channels):
+    native_metadata = sample.get("native_metadata", {})
+    microphone_type = str(native_metadata.get("microphone_type", "")).lower()
+    raw_path = str(sample.get("audio", {}).get("path", "")).lower()
+    if "mix-headset" in microphone_type or "mix-headset" in raw_path:
+        return "mix_headset"
+    if "headset" in microphone_type or "headset" in raw_path:
+        if channels is not None and channels > 1:
+            return "separated_headset_channels"
+        return "separated_headset_files"
+    if channels is not None and channels > 1:
+        return "separated_headset_channels"
+    return "unknown_audio_layout"
+
+
+def _null_speaker_tags(tags):
+    for field in SPEAKER_FIELDS:
+        tags["speaker"][field] = None
 
 
 def _run_brouhaha_tool(
@@ -738,6 +1186,46 @@ def audit_sound_field_scene(sound_field_scene):
     return warnings
 
 
+def audit_speaker(speaker):
+    # type: (Dict[str, Any]) -> List[Dict[str, Any]]
+    warnings = []  # type: List[Dict[str, Any]]
+
+    for field in SPEAKER_FIELDS:
+        value = speaker.get(field)
+        if value is not None and not isinstance(value, bool):
+            speaker[field] = None
+            warnings.append({"type": "invalid_speaker_value", "field": field})
+
+    return warnings
+
+
+def _audit_non_negative_number(tags, field, warnings, warning_type):
+    # type: (Dict[str, Any], str, List[Dict[str, Any]], str) -> None
+    value = tags.get(field)
+    if value is not None and (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not _is_finite_number(value)
+        or value < 0
+    ):
+        tags[field] = None
+        warnings.append({"type": warning_type, "field": field})
+
+
+def _audit_ratio(tags, field, warnings, warning_type):
+    # type: (Dict[str, Any], str, List[Dict[str, Any]], str) -> None
+    value = tags.get(field)
+    if value is not None and (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not _is_finite_number(value)
+        or value < 0
+        or value > 1
+    ):
+        tags[field] = None
+        warnings.append({"type": warning_type, "field": field})
+
+
 def _is_valid_silence_segments(segments, duration_sec):
     if (
         duration_sec is None
@@ -819,6 +1307,56 @@ def build_arg_parser():
         help="Python executable for Rec-RIR subprocess. Defaults to local_config.py.",
     )
     parser.add_argument(
+        "--moss-diarize-enable",
+        action="store_true",
+        help="Enable MOSS-Transcribe-Diarize for mixed/mono speaker diarization.",
+    )
+    parser.add_argument(
+        "--moss-diarize-endpoint",
+        default=None,
+        help="OpenAI-compatible MOSS /v1/audio/transcriptions endpoint.",
+    )
+    parser.add_argument(
+        "--moss-diarize-model",
+        default=None,
+        help="MOSS diarize model name. Defaults to local_config.py.",
+    )
+    parser.add_argument(
+        "--moss-diarize-timeout-sec",
+        type=int,
+        default=None,
+        help="MOSS diarize HTTP timeout in seconds. Defaults to local_config.py.",
+    )
+    parser.add_argument(
+        "--moss-diarize-max-new-tokens",
+        type=int,
+        default=None,
+        help="MOSS diarize max_new_tokens. Defaults to local_config.py.",
+    )
+    parser.add_argument(
+        "--moss-diarize-api-key",
+        default=None,
+        help="Optional bearer token for the MOSS endpoint.",
+    )
+    parser.add_argument(
+        "--speaker-channel-activity-disable",
+        action="store_true",
+        help="Disable multi-channel WAV channel-activity speaker route.",
+    )
+    parser.add_argument(
+        "--speaker-prefer-moss",
+        action="store_true",
+        help=(
+            "Prefer MOSS for separated headset when MOSS is enabled. "
+            "This is now the default and kept for compatibility."
+        ),
+    )
+    parser.add_argument(
+        "--speaker-prefer-channel-activity",
+        action="store_true",
+        help="Use the legacy channel-activity route before merged-headset MOSS for separated headset.",
+    )
+    parser.add_argument(
         "--artifact-dir",
         default=None,
         help=(
@@ -844,12 +1382,26 @@ def main(argv=None):
         use_gpu=args.recrir_use_gpu,
         subprocess_python=args.recrir_python,
     )
+    speaker_config = default_speaker_layer_config(
+        enable_moss=args.moss_diarize_enable,
+        moss_endpoint=args.moss_diarize_endpoint,
+        moss_model=args.moss_diarize_model,
+        moss_timeout_sec=args.moss_diarize_timeout_sec,
+        moss_max_new_tokens=args.moss_diarize_max_new_tokens,
+        moss_api_key=args.moss_diarize_api_key,
+    )
+    speaker_config.enable_channel_activity = not args.speaker_channel_activity_disable
+    if args.speaker_prefer_moss:
+        speaker_config.prefer_channel_activity = False
+    if args.speaker_prefer_channel_activity:
+        speaker_config.prefer_channel_activity = True
     summary = run_manifest(
         args.manifest,
         args.output,
         firered_vad_config=firered_vad_config,
         brouhaha_config=brouhaha_config,
         recrir_config=recrir_config,
+        speaker_config=speaker_config,
         artifact_dir=args.artifact_dir,
     )
     public_summary = {

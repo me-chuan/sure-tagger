@@ -9,8 +9,10 @@ import wave
 
 from tagger.input_schema import InputSchemaError, validate_input_record
 from tagger.pipelines.signal import (
+    audit_speaker,
     audit_sound_field_scene,
     resolve_audio_path,
+    run_manifest as run_signal_manifest,
     tag_record as tag_signal_record,
 )
 from tagger.tools.acoustic_io import probe_audio_info
@@ -40,6 +42,17 @@ from tagger.tools.sound_field_scene.rir_estimator import (
 from tagger.tools.sound_field_scene.rt60_estimator import (
     run as run_rt60_estimator,
 )
+from tagger.tools.speaker.channel_activity import (
+    ChannelActivityConfig,
+    detect_channel_activity,
+)
+from tagger.tools.speaker.config import default_speaker_layer_config
+from tagger.tools.speaker.metrics import (
+    SpeakerMetricsConfig,
+    build_metadata_from_timeline,
+    public_results_from_metadata,
+)
+from tagger.tools.speaker.moss_diarizer import parse_moss_text
 
 
 class AcousticToolsTest(unittest.TestCase):
@@ -438,6 +451,351 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertEqual(artifact["sample_rate_hz"], 16000)
             self.assertEqual(len(artifact["samples"]), len(rir_samples))
 
+    def test_speaker_metrics_derive_internal_summary_and_public_utterance_tags(self):
+        metadata = build_metadata_from_timeline(
+            [
+                {"start_sec": 0.0, "end_sec": 1.2, "speaker_id": "S01"},
+                {"start_sec": 0.8, "end_sec": 2.0, "speaker_id": "S02"},
+            ],
+            duration_sec=2.0,
+            sample_id="u1",
+            recording_id="meet1",
+            target_units=[
+                {"unit_id": "u0", "start_sec": 0.0, "end_sec": 0.75},
+                {"unit_id": "u1", "start_sec": 0.7, "end_sec": 1.1},
+            ],
+            config=SpeakerMetricsConfig(min_speech_duration_sec=0.1),
+        )
+
+        summary = metadata["recording_summary"]
+        self.assertEqual(summary["speaker_count"], 2)
+        self.assertTrue(summary["multi_speaker"])
+        self.assertEqual(summary["turn_count"], 2)
+        self.assertEqual(summary["speaker_change_rate_per_min"], 30.0)
+        self.assertEqual(summary["overlap_ratio_speech"], 0.2)
+        self.assertEqual(summary["crosstalk_level"], "medium")
+        self.assertEqual(summary["dominant_speaker_ratio"], 0.6)
+
+        utterances = metadata["utterances"]
+        self.assertEqual(utterances[0]["primary_speaker_id"], "spk_001")
+        self.assertEqual(utterances[0]["active_speaker_count"], 1)
+        self.assertFalse(utterances[0]["is_overlapped"])
+        self.assertEqual(utterances[1]["active_speaker_count"], 2)
+        self.assertEqual(utterances[1]["speaker_change_count"], 1)
+        self.assertTrue(utterances[1]["speaker_change"])
+        self.assertTrue(utterances[1]["is_overlapped"])
+        self.assertEqual(utterances[1]["overlap_ratio"], 0.75)
+
+        public_values = {
+            result.tag_path: result.value
+            for result in public_results_from_metadata(metadata)
+        }
+        self.assertTrue(public_values["speaker.multi_speaker"])
+        self.assertTrue(public_values["speaker.speaker_change"])
+        self.assertTrue(public_values["speaker.speaker_overlap"])
+        self.assertEqual(
+            set(public_values),
+            {"speaker.multi_speaker", "speaker.speaker_change", "speaker.speaker_overlap"},
+        )
+
+    def test_utterance_overlap_ratio_uses_speech_union_not_utterance_duration(self):
+        metadata = build_metadata_from_timeline(
+            [
+                {"start_sec": 0.0, "end_sec": 1.0, "speaker_id": "S01"},
+                {"start_sec": 0.8, "end_sec": 1.2, "speaker_id": "S02"},
+            ],
+            duration_sec=10.0,
+            sample_id="u_silence_padded",
+            recording_id="meet1",
+            target_units=[
+                {"unit_id": "u_silence_padded", "start_sec": 0.0, "end_sec": 10.0},
+            ],
+            config=SpeakerMetricsConfig(min_speech_duration_sec=0.1),
+        )
+
+        utterance = metadata["utterances"][0]
+        self.assertEqual(utterance["overlap_duration_sec"], 0.2)
+        self.assertEqual(utterance["speech_union_duration_sec"], 1.2)
+        self.assertEqual(utterance["overlap_ratio"], 0.166667)
+        self.assertTrue(utterance["is_overlapped"])
+
+        public_values = {
+            result.tag_path: result.value
+            for result in public_results_from_metadata(metadata)
+        }
+        self.assertTrue(public_values["speaker.speaker_overlap"])
+
+    def test_moss_text_parser_reads_speaker_timestamp_segments(self):
+        segments = parse_moss_text(
+            "[0.00][S01] hello there [1.00]\n"
+            "[0.80][S02] hi [2.00]"
+        )
+
+        self.assertEqual(
+            segments,
+            [
+                {
+                    "start_sec": 0.0,
+                    "end_sec": 1.0,
+                    "speaker_id": "S01",
+                    "text": "hello there",
+                },
+                {
+                    "start_sec": 0.8,
+                    "end_sec": 2.0,
+                    "speaker_id": "S02",
+                    "text": "hi",
+                },
+            ],
+        )
+
+    def test_channel_activity_detects_multichannel_speech_and_overlap(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "headset.wav"
+            write_channel_activity_wav(
+                path,
+                sample_rate=8000,
+                duration_sec=2.0,
+                channel_segments=[
+                    [(0.0, 1.2)],
+                    [(0.8, 2.0)],
+                ],
+            )
+
+            activity = detect_channel_activity(
+                path,
+                duration_sec=2.0,
+                config=ChannelActivityConfig(
+                    window_sec=0.05,
+                    energy_threshold=500.0,
+                    min_segment_duration_sec=0.1,
+                    merge_gap_sec=0.05,
+                ),
+            )
+
+            self.assertEqual(len(activity["channels"]), 2)
+            self.assertEqual(
+                activity["channels"][0]["speech_segments"],
+                [{"start_sec": 0.0, "end_sec": 1.2}],
+            )
+            self.assertEqual(
+                activity["channels"][1]["speech_segments"],
+                [{"start_sec": 0.8, "end_sec": 2.0}],
+            )
+
+    def test_signal_pipeline_uses_injected_moss_client_for_speaker_tags(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "mono.wav"
+            write_test_wav(path, sample_rate=8000, channels=1, duration_sec=2.0)
+            artifact_dir = Path(tmpdir) / "artifacts"
+
+            tags = tag_signal_record(
+                make_record(str(path)),
+                tmpdir,
+                firered_vad_config=FireRedVadConfig(
+                    model_dir=str(Path(tmpdir) / "missing_model"),
+                    subprocess_python="",
+                ),
+                brouhaha_config=BrouhahaConfig(
+                    model_path=str(Path(tmpdir) / "missing_brouhaha.ckpt"),
+                    repo_dir=str(Path(tmpdir) / "missing_brouhaha_repo"),
+                    subprocess_python="",
+                ),
+                recrir_config=RecRirConfig(
+                    repo_dir=str(Path(tmpdir) / "missing_recrir_repo"),
+                    config_path=str(Path(tmpdir) / "missing_recrir.toml"),
+                    checkpoint_path=str(Path(tmpdir) / "missing_recrir.tar"),
+                    subprocess_python="",
+                ),
+                speaker_config=default_speaker_layer_config(enable_moss=True),
+                moss_client=FakeMossClient(
+                    {
+                        "segments": [
+                            {"start_sec": 0.0, "end_sec": 1.2, "speaker_id": "S01"},
+                            {"start_sec": 0.8, "end_sec": 2.0, "speaker_id": "S02"},
+                        ]
+                    }
+                ),
+                artifact_dir=artifact_dir,
+            )
+
+            self.assertTrue(tags["speaker"]["multi_speaker"])
+            self.assertTrue(tags["speaker"]["speaker_change"])
+            self.assertTrue(tags["speaker"]["speaker_overlap"])
+            self.assertNotIn("metadata", tags["speaker"])
+            self.assertNotIn("artifact_path", json.dumps(tags, sort_keys=True))
+
+            artifacts = list((artifact_dir / "speaker").glob("*.moss_diarize.json.gz"))
+            self.assertEqual(len(artifacts), 1)
+            with gzip.open(str(artifacts[0]), "rt", encoding="utf-8") as source:
+                artifact = json.load(source)
+            self.assertEqual(artifact["primary_route"], "moss_diarize")
+            self.assertEqual(artifact["recording_summary"]["speaker_count"], 2)
+
+    def test_signal_pipeline_uses_merged_headset_moss_for_separated_headset(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "headset.wav"
+            write_test_wav(path, sample_rate=8000, channels=2, duration_sec=2.0)
+            artifact_dir = Path(tmpdir) / "artifacts"
+            record = make_record(str(path))
+            record["sample"]["native_metadata"]["microphone_type"] = "Headset"
+
+            tags = tag_signal_record(
+                record,
+                tmpdir,
+                firered_vad_config=FireRedVadConfig(
+                    model_dir=str(Path(tmpdir) / "missing_model"),
+                    subprocess_python="",
+                ),
+                brouhaha_config=BrouhahaConfig(
+                    model_path=str(Path(tmpdir) / "missing_brouhaha.ckpt"),
+                    repo_dir=str(Path(tmpdir) / "missing_brouhaha_repo"),
+                    subprocess_python="",
+                ),
+                recrir_config=RecRirConfig(
+                    repo_dir=str(Path(tmpdir) / "missing_recrir_repo"),
+                    config_path=str(Path(tmpdir) / "missing_recrir.toml"),
+                    checkpoint_path=str(Path(tmpdir) / "missing_recrir.tar"),
+                    subprocess_python="",
+                ),
+                speaker_config=default_speaker_layer_config(enable_moss=True),
+                moss_client=FakeMossClient(
+                    {
+                        "segments": [
+                            {"start_sec": 0.0, "end_sec": 1.2, "speaker_id": "S01"},
+                            {"start_sec": 0.8, "end_sec": 2.0, "speaker_id": "S02"},
+                        ]
+                    }
+                ),
+                artifact_dir=artifact_dir,
+            )
+
+            self.assertTrue(tags["speaker"]["multi_speaker"])
+            self.assertTrue(tags["speaker"]["speaker_change"])
+            self.assertTrue(tags["speaker"]["speaker_overlap"])
+
+            artifacts = list((artifact_dir / "speaker").glob("*.moss_diarize_merged_headset.json.gz"))
+            self.assertEqual(len(artifacts), 1)
+            with gzip.open(str(artifacts[0]), "rt", encoding="utf-8") as source:
+                artifact = json.load(source)
+            self.assertEqual(artifact["primary_route"], "moss_diarize_merged_headset")
+            self.assertEqual(artifact["input_kind"], "separated_headset_channels")
+            self.assertEqual(artifact["recording_summary"]["speaker_count"], 2)
+            self.assertEqual(
+                [segment["speaker_id"] for segment in artifact["segments"]],
+                ["spk_001", "spk_002"],
+            )
+            self.assertNotIn("source_channel_id", artifact["segments"][0])
+
+    def test_signal_manifest_passes_injected_channel_activity_client(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "stereo.wav"
+            write_test_wav(path, sample_rate=8000, channels=2, duration_sec=2.0)
+            manifest_path = Path(tmpdir) / "manifest.jsonl"
+            output_path = Path(tmpdir) / "tags.jsonl"
+            with manifest_path.open("w", encoding="utf-8") as sink:
+                sink.write(json.dumps(make_record(str(path)), ensure_ascii=False) + "\n")
+
+            run_signal_manifest(
+                manifest_path,
+                output_path,
+                firered_vad_config=FireRedVadConfig(
+                    model_dir=str(Path(tmpdir) / "missing_model"),
+                    subprocess_python="",
+                ),
+                brouhaha_config=BrouhahaConfig(
+                    model_path=str(Path(tmpdir) / "missing_brouhaha.ckpt"),
+                    repo_dir=str(Path(tmpdir) / "missing_brouhaha_repo"),
+                    subprocess_python="",
+                ),
+                recrir_config=RecRirConfig(
+                    repo_dir=str(Path(tmpdir) / "missing_recrir_repo"),
+                    config_path=str(Path(tmpdir) / "missing_recrir.toml"),
+                    checkpoint_path=str(Path(tmpdir) / "missing_recrir.tar"),
+                    subprocess_python="",
+                ),
+                speaker_config=default_speaker_layer_config(enable_moss=False),
+                channel_activity_client=FakeChannelActivityClient(
+                    {
+                        "metadata_version": "channel_activity_v0.1",
+                        "duration_sec": 2.0,
+                        "channels": [
+                            {
+                                "channel_id": "ch0",
+                                "speaker_id": "spk_A",
+                                "speech_segments": [
+                                    {"start_sec": 0.0, "end_sec": 1.2}
+                                ],
+                            },
+                            {
+                                "channel_id": "ch1",
+                                "speaker_id": "spk_B",
+                                "speech_segments": [
+                                    {"start_sec": 0.8, "end_sec": 2.0}
+                                ],
+                            },
+                        ],
+                    }
+                ),
+            )
+
+            with output_path.open("r", encoding="utf-8") as source:
+                tags = json.loads(source.readline())
+            self.assertTrue(tags["speaker"]["multi_speaker"])
+            self.assertTrue(tags["speaker"]["speaker_change"])
+            self.assertTrue(tags["speaker"]["speaker_overlap"])
+            self.assertNotIn("channel_activity", tags["speaker"])
+
+    def test_signal_pipeline_does_not_treat_mix_headset_stereo_as_separated_channels(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "sample.Mix-Headset.wav"
+            write_test_wav(path, sample_rate=8000, channels=2, duration_sec=2.0)
+
+            tags = tag_signal_record(
+                make_record(str(path)),
+                tmpdir,
+                firered_vad_config=FireRedVadConfig(
+                    model_dir=str(Path(tmpdir) / "missing_model"),
+                    subprocess_python="",
+                ),
+                brouhaha_config=BrouhahaConfig(
+                    model_path=str(Path(tmpdir) / "missing_brouhaha.ckpt"),
+                    repo_dir=str(Path(tmpdir) / "missing_brouhaha_repo"),
+                    subprocess_python="",
+                ),
+                recrir_config=RecRirConfig(
+                    repo_dir=str(Path(tmpdir) / "missing_recrir_repo"),
+                    config_path=str(Path(tmpdir) / "missing_recrir.toml"),
+                    checkpoint_path=str(Path(tmpdir) / "missing_recrir.tar"),
+                    subprocess_python="",
+                ),
+                speaker_config=default_speaker_layer_config(enable_moss=False),
+            )
+
+            self.assertEqual(tags["basic_acoustic"]["channels"], 2)
+            self.assertIsNone(tags["speaker"]["multi_speaker"])
+            self.assertIsNone(tags["speaker"]["speaker_change"])
+            self.assertIsNone(tags["speaker"]["speaker_overlap"])
+
+    def test_speaker_auditor_rejects_invalid_public_values(self):
+        speaker = {
+            "multi_speaker": "yes",
+            "speaker_change": "yes",
+            "speaker_overlap": 1,
+        }
+
+        warnings = audit_speaker(speaker)
+
+        self.assertEqual(
+            warnings,
+            [
+                {"type": "invalid_speaker_value", "field": "multi_speaker"},
+                {"type": "invalid_speaker_value", "field": "speaker_change"},
+                {"type": "invalid_speaker_value", "field": "speaker_overlap"},
+            ],
+        )
+        self.assertTrue(all(value is None for value in speaker.values()))
+
 
 def make_record(audio_path):
     return {
@@ -484,6 +842,31 @@ class FakeRecRirClient:
         return self.output
 
 
+class FakeMossClient:
+    def __init__(self, output):
+        if isinstance(output, list):
+            self.outputs = list(output)
+            self.output = None
+        else:
+            self.outputs = None
+            self.output = output
+
+    def diarize(self, audio_path, context=None):
+        if self.outputs is not None:
+            if not self.outputs:
+                return {"segments": []}
+            return self.outputs.pop(0)
+        return self.output
+
+
+class FakeChannelActivityClient:
+    def __init__(self, output):
+        self.output = output
+
+    def detect_channel_activity(self, audio_path, context=None):
+        return self.output
+
+
 def write_test_wav(
     path: Path,
     sample_rate: int,
@@ -495,6 +878,24 @@ def write_test_wav(
     for index in range(frame_count):
         sample = int(10000 * math.sin(2 * math.pi * 440 * index / sample_rate))
         frames.extend([sample] * channels)
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(struct.pack("<" + "h" * len(frames), *frames))
+
+
+def write_channel_activity_wav(path, sample_rate, duration_sec, channel_segments):
+    frame_count = int(sample_rate * duration_sec)
+    channels = len(channel_segments)
+    frames = []
+    for index in range(frame_count):
+        time_sec = (float(index) + 0.5) / float(sample_rate)
+        carrier = math.sin(2 * math.pi * 440 * index / sample_rate)
+        for segments in channel_segments:
+            active = any(start <= time_sec < end for start, end in segments)
+            sample = int(10000 * carrier) if active else 0
+            frames.append(sample)
     with wave.open(str(path), "wb") as wav:
         wav.setnchannels(channels)
         wav.setsampwidth(2)

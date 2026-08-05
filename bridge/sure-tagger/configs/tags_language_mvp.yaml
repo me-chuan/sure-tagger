@@ -60,6 +60,9 @@ tags:
       meeting_window_sec: 120
       speaker_neighbor_segments: 3
       max_context_chars: 6000
+    short_utterance_guard:
+      enabled: true
+      max_tokens: 3
     unknown_confidence_threshold: 0.5
     cache:
       enabled: true

@@ -1,4 +1,5 @@
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import re
@@ -7,6 +8,7 @@ import sys
 import yaml
 
 from sure_tagger.datasets.ami import build_manifest
+from sure_tagger.datasets.ami_utterance import build_utterance_manifest
 from sure_tagger.io.jsonl import JsonlWriter, read_jsonl
 from sure_tagger.meeting_manifest import build_meeting_manifest
 from sure_tagger.report import update_distribution, write_report
@@ -90,6 +92,31 @@ def cmd_build_meeting_manifest(args):
     print("report: %s" % report_path)
 
 
+def cmd_build_utterance_manifest(args):
+    meetings = parse_csv(args.meetings)
+    parent = os.path.dirname(args.output)
+    if parent and not os.path.exists(parent):
+        os.makedirs(parent)
+    bad_path = args.bad_samples or os.path.join(parent, "bad_samples.build_utterance_manifest.jsonl")
+    with JsonlWriter(args.output) as out, JsonlWriter(bad_path) as bad:
+        if args.dataset not in ("ami_utterance", "ami"):
+            raise ValueError("Unsupported utterance dataset: %s" % args.dataset)
+        stats = build_utterance_manifest(
+            args.root,
+            out,
+            bad_writer=bad,
+            limit=args.limit,
+            meetings=meetings,
+        )
+    report_path = args.report or os.path.join(parent, "build_utterance_manifest.report.json")
+    stats["dataset"] = args.dataset
+    stats["root"] = args.root
+    stats["created_at"] = now_iso()
+    write_report(report_path, stats)
+    print("wrote %s utterance records to %s" % (stats["records"], args.output))
+    print("report: %s" % report_path)
+
+
 def build_topic_context(record, context_builder, conf):
     sample = record["sample"]
     meta = sample.get("native_metadata", {})
@@ -106,6 +133,7 @@ def build_topic_context(record, context_builder, conf):
         return {
             "meeting_id": meta.get("meeting_id", ""),
             "speaker_ids": meta.get("speaker_ids", []),
+            "target_granularity": "meeting",
             "evidence_scope": "meeting",
             "evidence_sample_count": meta.get("source_sample_count", 1),
             "text_segment_count": meta.get("text_segment_count", 0),
@@ -120,6 +148,51 @@ def build_topic_context(record, context_builder, conf):
         speaker_neighbor_segments=ctx_conf.get("speaker_neighbor_segments", 3),
         max_context_chars=ctx_conf.get("max_context_chars", 6000),
     )
+
+
+def _tag_one_record(record, tag_names, config, context_builder, run_id, config_path):
+    sample_id = record["sample"]["sample_id"]
+    result_tags = {}
+    errors = []
+    for name in tag_names:
+        conf = config.get("tags", {}).get(name, {})
+        try:
+            if name == "topic":
+                ctx = build_topic_context(record, context_builder, conf)
+                tag_result = TAGGERS[name](record, conf, context=ctx)
+            else:
+                tag_result = TAGGERS[name](record, conf)
+            result_tags[name] = tag_result
+        except Exception as exc:
+            errors.append(make_error(
+                sample_id,
+                "tag:%s" % name,
+                exc.__class__.__name__,
+                exc,
+                record["sample"]["provenance"].get("source_path"),
+            ))
+    return {
+        "record": {
+            "sample_id": sample_id,
+            "tags": result_tags,
+            "pipeline": {
+                "run_id": run_id or "sure_tagger_run",
+                "config": config_path or "",
+                "created_at": now_iso(),
+            },
+        },
+        "errors": errors,
+    }
+
+
+def _write_tagged_record(result, out, bad, report):
+    for name, tag_result in result["record"]["tags"].items():
+        update_distribution(report["distributions"], name, tag_result)
+    for error in result["errors"]:
+        report["bad_records"] += 1
+        bad.write(error)
+    out.write(result["record"])
+    report["records_written"] += 1
 
 
 def cmd_tag(args):
@@ -150,39 +223,45 @@ def cmd_tag(args):
         "manifest": args.manifest,
         "output": args.output,
         "tag_names": tag_names,
+        "workers": max(1, int(getattr(args, "workers", 1) or 1)),
         "records_seen": len(records),
         "records_written": 0,
         "bad_records": 0,
         "distributions": {},
     }
 
+    workers = report["workers"]
+    if workers > 1:
+        print("tag workers: %s" % workers)
+
     with JsonlWriter(args.output) as out, JsonlWriter(bad_path) as bad:
-        for rec in records:
-            sample_id = rec["sample"]["sample_id"]
-            result_tags = {}
-            for name in tag_names:
-                conf = config.get("tags", {}).get(name, {})
-                try:
-                    if name == "topic":
-                        ctx = build_topic_context(rec, context_builder, conf)
-                        tag_result = TAGGERS[name](rec, conf, context=ctx)
-                    else:
-                        tag_result = TAGGERS[name](rec, conf)
-                    result_tags[name] = tag_result
-                    update_distribution(report["distributions"], name, tag_result)
-                except Exception as exc:
-                    report["bad_records"] += 1
-                    bad.write(make_error(sample_id, "tag:%s" % name, exc.__class__.__name__, exc, rec["sample"]["provenance"].get("source_path")))
-            out.write({
-                "sample_id": sample_id,
-                "tags": result_tags,
-                "pipeline": {
-                    "run_id": args.run_id or "sure_tagger_run",
-                    "config": args.config or "",
-                    "created_at": now_iso(),
-                },
-            })
-            report["records_written"] += 1
+        if workers <= 1 or len(records) <= 1:
+            for rec in records:
+                result = _tag_one_record(
+                    rec,
+                    tag_names,
+                    config,
+                    context_builder,
+                    args.run_id,
+                    args.config,
+                )
+                _write_tagged_record(result, out, bad, report)
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [
+                    executor.submit(
+                        _tag_one_record,
+                        rec,
+                        tag_names,
+                        config,
+                        context_builder,
+                        args.run_id,
+                        args.config,
+                    )
+                    for rec in records
+                ]
+                for future in futures:
+                    _write_tagged_record(future.result(), out, bad, report)
     report_path = args.report or os.path.join(parent, "tag.report.json")
     write_report(report_path, report)
     print("tagged %s records -> %s" % (report["records_written"], args.output))
@@ -295,6 +374,7 @@ def cmd_run_meeting_pipeline(args):
         run_id=args.run_id or run_name,
         topic_provider=args.topic_provider,
         dry_run=args.dry_run,
+        workers=args.workers,
     ))
 
     qa_path = ""
@@ -319,6 +399,7 @@ def cmd_run_meeting_pipeline(args):
         "tag_names": tag_names,
         "include_topic": bool("topic" in tag_names),
         "topic_provider_override": args.topic_provider or "",
+        "workers": max(1, int(getattr(args, "workers", 1) or 1)),
         "paths": {
             "segment_manifest": segment_manifest,
             "segment_report": segment_report,
@@ -338,6 +419,102 @@ def cmd_run_meeting_pipeline(args):
     write_report(pipeline_report, report)
     print("pipeline report: %s" % pipeline_report)
     print("final meeting tags: %s" % tag_output)
+
+
+def cmd_run_utterance_pipeline(args):
+    if args.dataset not in ("ami_utterance", "ami"):
+        raise ValueError("Unsupported utterance dataset: %s" % args.dataset)
+
+    meetings = parse_csv(args.meetings)
+    run_name = args.run_name
+    if not run_name:
+        run_name = "full" if not meetings else "meetings.%s" % "_".join(meetings)
+    run_name = safe_name(run_name)
+
+    output_dir = args.output_dir or os.path.join("outputs", "ami_utterance")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    utterance_manifest = os.path.join(output_dir, "utterance_manifest.%s.jsonl" % run_name)
+    utterance_bad = os.path.join(output_dir, "bad_samples.build_utterance_manifest.%s.jsonl" % run_name)
+    utterance_report = os.path.join(output_dir, "build_utterance_manifest.%s.report.json" % run_name)
+
+    tag_output = args.output or os.path.join(output_dir, "utterance_tags.%s.jsonl" % run_name)
+    tag_bad = os.path.join(output_dir, "bad_samples.tag.utterance.%s.jsonl" % run_name)
+    tag_report = os.path.join(output_dir, "tag.utterance.%s.report.json" % run_name)
+
+    qa_output = os.path.join(output_dir, "utterance_qa_samples.%s.jsonl" % run_name)
+    pipeline_report = os.path.join(output_dir, "pipeline.utterance.%s.report.json" % run_name)
+
+    tag_names = pipeline_tag_names(args)
+    for name in tag_names:
+        if name not in TAGGERS:
+            raise ValueError("Unknown tag: %s" % name)
+
+    print("[1/3] build utterance manifest")
+    cmd_build_utterance_manifest(argparse.Namespace(
+        dataset=args.dataset,
+        root=args.root,
+        output=utterance_manifest,
+        bad_samples=utterance_bad,
+        report=utterance_report,
+        limit=args.limit,
+        meetings=args.meetings,
+    ))
+
+    print("[2/3] tag utterances")
+    cmd_tag(argparse.Namespace(
+        manifest=utterance_manifest,
+        config=args.config,
+        tags=",".join(tag_names),
+        output=tag_output,
+        bad_samples=tag_bad,
+        report=tag_report,
+        limit=None,
+        run_id=args.run_id or run_name,
+        topic_provider=args.topic_provider,
+        dry_run=args.dry_run,
+        workers=args.workers,
+    ))
+
+    qa_path = ""
+    if not args.skip_qa:
+        print("[3/3] build QA samples")
+        cmd_inspect(argparse.Namespace(
+            manifest=utterance_manifest,
+            tags_file=tag_output,
+            sample_size=args.qa_sample_size,
+            output=qa_output,
+        ))
+        qa_path = qa_output
+    else:
+        print("[3/3] skip QA samples")
+
+    report = {
+        "created_at": now_iso(),
+        "dataset": args.dataset,
+        "root": args.root,
+        "run_name": run_name,
+        "meetings": meetings,
+        "tag_names": tag_names,
+        "include_topic": bool("topic" in tag_names),
+        "topic_provider_override": args.topic_provider or "",
+        "workers": max(1, int(getattr(args, "workers", 1) or 1)),
+        "paths": {
+            "utterance_manifest": utterance_manifest,
+            "utterance_report": utterance_report,
+            "utterance_bad_samples": utterance_bad,
+            "tag_output": tag_output,
+            "tag_report": tag_report,
+            "tag_bad_samples": tag_bad,
+            "qa_output": qa_path,
+        },
+        "utterance_stats": load_json(utterance_report),
+        "tag_stats": load_json(tag_report),
+    }
+    write_report(pipeline_report, report)
+    print("pipeline report: %s" % pipeline_report)
+    print("final utterance tags: %s" % tag_output)
 
 
 def build_parser():
@@ -363,6 +540,16 @@ def build_parser():
     p.add_argument("--meetings")
     p.set_defaults(func=cmd_build_meeting_manifest)
 
+    p = sub.add_parser("build-utterance-manifest")
+    p.add_argument("--dataset", required=True)
+    p.add_argument("--root", required=True)
+    p.add_argument("--output", required=True)
+    p.add_argument("--bad-samples")
+    p.add_argument("--report")
+    p.add_argument("--limit", type=int)
+    p.add_argument("--meetings")
+    p.set_defaults(func=cmd_build_utterance_manifest)
+
     p = sub.add_parser("tag")
     p.add_argument("--manifest", required=True)
     p.add_argument("--config")
@@ -374,6 +561,7 @@ def build_parser():
     p.add_argument("--run-id")
     p.add_argument("--topic-provider")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--workers", type=int, default=1)
     p.set_defaults(func=cmd_tag)
 
     p = sub.add_parser("inspect")
@@ -400,7 +588,27 @@ def build_parser():
     p.add_argument("--qa-sample-size", type=int, default=20)
     p.add_argument("--skip-qa", action="store_true")
     p.add_argument("--run-id")
+    p.add_argument("--workers", type=int, default=1)
     p.set_defaults(func=cmd_run_meeting_pipeline)
+
+    p = sub.add_parser("run-utterance-pipeline")
+    p.add_argument("--dataset", required=True)
+    p.add_argument("--root", required=True)
+    p.add_argument("--output-dir", default=os.path.join("outputs", "ami_utterance"))
+    p.add_argument("--output")
+    p.add_argument("--config", default=os.path.join("configs", "tags_language_mvp.yaml"))
+    p.add_argument("--meetings")
+    p.add_argument("--run-name")
+    p.add_argument("--tags")
+    p.add_argument("--include-topic", action="store_true")
+    p.add_argument("--topic-provider")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--limit", type=int)
+    p.add_argument("--qa-sample-size", type=int, default=20)
+    p.add_argument("--skip-qa", action="store_true")
+    p.add_argument("--run-id")
+    p.add_argument("--workers", type=int, default=1)
+    p.set_defaults(func=cmd_run_utterance_pipeline)
 
     return parser
 
