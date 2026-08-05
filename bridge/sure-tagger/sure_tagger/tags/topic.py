@@ -1,4 +1,5 @@
 import os
+import re
 
 import yaml
 
@@ -9,7 +10,39 @@ from sure_tagger.schemas import make_tag
 from sure_tagger.text.key_terms import extract_keywords, extract_proper_nouns
 
 
-TOOL_VERSION = "topic_v0.3.0"
+TOOL_VERSION = "topic_v0.4.0"
+
+
+BACKCHANNEL_WORDS = set([
+    "ah",
+    "aha",
+    "alright",
+    "aye",
+    "eh",
+    "er",
+    "erm",
+    "fine",
+    "great",
+    "hm",
+    "hmm",
+    "huh",
+    "kay",
+    "mhm",
+    "mm",
+    "no",
+    "oh",
+    "okay",
+    "ok",
+    "right",
+    "sure",
+    "uh",
+    "uhh",
+    "um",
+    "umm",
+    "yeah",
+    "yep",
+    "yes",
+])
 
 
 def load_taxonomy(path):
@@ -64,6 +97,8 @@ def heuristic_topic(text, context, taxonomy):
         text or "",
         context.get("meeting_window_text", ""),
         context.get("speaker_window_text", ""),
+        context.get("neighbor_window_text", ""),
+        context.get("same_speaker_window_text", ""),
     ]).lower()
     major = "other"
     minor = "insufficient_context"
@@ -121,6 +156,31 @@ def _as_bool(value, default):
         if normalized in ("0", "false", "no", "n", "off", "none", "null", ""):
             return False
     return default
+
+
+def _guard_config(config):
+    value = (config or {}).get("short_utterance_guard", {})
+    if isinstance(value, dict):
+        return value
+    return {"enabled": value}
+
+
+def topic_word_tokens(text):
+    return re.findall(r"[a-z]+(?:'[a-z]+)?", (text or "").lower())
+
+
+def is_non_content_utterance(text, config=None):
+    guard = _guard_config(config)
+    if not _as_bool(guard.get("enabled"), True):
+        return False
+    max_tokens = _as_int(guard.get("max_tokens"), 3)
+    tokens = topic_word_tokens(text)
+    if not tokens or len(tokens) > max_tokens:
+        return False
+    words = set(BACKCHANNEL_WORDS)
+    for item in guard.get("extra_words", []):
+        words.add(str(item).strip().lower())
+    return all(token in words for token in tokens)
 
 
 def resolve_topic_schema_path(config):
@@ -326,8 +386,42 @@ def tag(record, config=None, context=None):
     taxonomy = load_taxonomy(taxonomy_path)
     provider = (config.get("model") or {}).get("provider", config.get("method", "heuristic"))
     text, llm_text = _topic_texts(record)
+    meta = record["sample"].get("native_metadata", {})
+    native_granularity = meta.get("granularity") or (
+        "utterance" if meta.get("utt_id") or meta.get("utterances") else "segment"
+    )
+    target_granularity = context.get("target_granularity", native_granularity)
     single_call_max_chars, chunk_chars = _topic_limits(config)
     schema_path = resolve_topic_schema_path(config)
+
+    if target_granularity == "utterance" and is_non_content_utterance(text, config):
+        value = {
+            "major_topic": "other",
+            "minor_topic": "insufficient_context",
+        }
+        details = {
+            "taxonomy": taxonomy.get("version"),
+            "prompt_version": TOPIC_PROMPT_VERSION,
+            "provider": provider,
+            "evidence_scope": context.get("evidence_scope", "sample"),
+            "evidence_sample_count": context.get("evidence_sample_count", 1),
+            "granularity": native_granularity,
+            "target_granularity": target_granularity,
+            "input_char_count": len(llm_text or ""),
+            "guard": "short_non_content_utterance",
+            "topic_keywords": [],
+            "proper_nouns": [],
+            "reason_short": "Target utterance is a short acknowledgement, backchannel, filler, or non-content response.",
+            "secondary_topics": [],
+        }
+        return make_tag(
+            value,
+            0.95,
+            "deterministic_non_content_utterance_guard",
+            TOOL_VERSION,
+            "L1",
+            details,
+        )
 
     cache_conf = config.get("cache", {})
     cache = JsonlCache(cache_conf.get("path")) if cache_conf.get("enabled", True) else None
@@ -355,7 +449,8 @@ def tag(record, config=None, context=None):
         "cache_key": cache_key,
         "evidence_scope": context.get("evidence_scope", "sample"),
         "evidence_sample_count": context.get("evidence_sample_count", 1),
-        "granularity": record["sample"].get("native_metadata", {}).get("granularity", "segment"),
+        "granularity": native_granularity,
+        "target_granularity": target_granularity,
         "single_call_max_chars": single_call_max_chars,
         "chunk_chars": chunk_chars,
         "use_json_schema": bool(schema_path),

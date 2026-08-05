@@ -14,8 +14,8 @@ def require_keys(obj, keys, name):
 def validate_manifest_record(record):
     require_keys(record, ["corpus", "sample"], "manifest record")
     sample = record["sample"]
-    require_keys(sample, ["sample_id", "audio", "text", "native_metadata", "provenance"], "sample")
-    require_keys(sample["audio"], ["path", "start_sec", "end_sec"], "sample.audio")
+    require_keys(sample, ["sample_id", "audio", "text", "native_metadata"], "sample")
+    require_keys(sample["audio"], ["path"], "sample.audio")
     require_keys(sample["text"], ["transcript"], "sample.text")
     return True
 

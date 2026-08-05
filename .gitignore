@@ -40,6 +40,8 @@ api.txt
 /bridge/sure-tagger/AMI
 /bridge/sure-tagger/outputs/
 /phase1_asr_samples/outputs/
+/ami_en2001a_utterances/audio/
+/ami_en2001a_utterances/outputs/
 /outputs/
 
 # Third-party model repositories and model artifacts
