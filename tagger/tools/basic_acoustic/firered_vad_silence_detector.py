@@ -6,19 +6,18 @@ leave silence tags as null instead of substituting another detector.
 """
 
 from pathlib import Path
-import shutil
-import subprocess
-import tempfile
 
 from tagger.local_config import FIRERED_VAD_MODEL_DIR, FIRERED_VAD_PYTHON
-from tagger.tools.acoustic_io import get_audio_info
 from tagger.tools.base import TOOL_VERSION, ToolResult
+from tagger.tools.firered_audio import (
+    SUPPORTED_SAMPLE_RATE_HZ,
+    prepare_firered_audio,
+)
 from tagger.tools.subprocess_runner import run_subprocess_tool
 
 
 TOOL_NAME = "firered_vad_silence_detector"
 METHOD = "FireRed VAD"
-SUPPORTED_SAMPLE_RATE_HZ = 16000
 ROUND_DIGITS = 6
 BOUNDARY_EPSILON_SEC = 1e-3
 
@@ -118,49 +117,14 @@ class FireRedVadClient:
         return result.get("timestamps", [])
 
     def _prepare_audio(self, audio_path, context=None):
-        info = get_audio_info(audio_path, context)
-        if (
-            not self.config.normalize_to_16k_mono_pcm
-            or (
-                info.sample_rate_hz == SUPPORTED_SAMPLE_RATE_HZ
-                and info.channels == 1
-                and info.sample_width_bytes == 2
-            )
-        ):
-            return str(audio_path), None
-
-        if shutil.which("ffmpeg") is None:
-            raise FireRedVadError(
-                "ffmpeg is required to convert audio to 16kHz 16-bit mono PCM WAV"
-            )
-
-        tmpdir = tempfile.TemporaryDirectory(prefix="firered_vad_")
-        converted_path = Path(tmpdir.name) / "input_16k_mono_pcm.wav"
-        command = [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-i",
-            str(audio_path),
-            "-ar",
-            str(SUPPORTED_SAMPLE_RATE_HZ),
-            "-ac",
-            "1",
-            "-acodec",
-            "pcm_s16le",
-            "-f",
-            "wav",
-            str(converted_path),
-        ]
-        try:
-            subprocess.check_call(command)
-        except subprocess.CalledProcessError as exc:
-            tmpdir.cleanup()
-            raise FireRedVadError("ffmpeg conversion failed for FireRed VAD") from exc
-
-        return str(converted_path), tmpdir
+        return prepare_firered_audio(
+            audio_path,
+            context=context,
+            normalize_to_16k_mono_pcm=self.config.normalize_to_16k_mono_pcm,
+            error_class=FireRedVadError,
+            tool_label="FireRed VAD",
+            temp_prefix="firered_vad_",
+        )
 
     def _detect(self, wav_path, context=None):
         vad = self._get_vad(context)

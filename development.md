@@ -12,7 +12,7 @@
 
 | 分组 | 字段 |
 | --- | --- |
-| `basic_acoustic` | `duration_sec`、`sample_rate_hz`、`channels`、`silence_segments`、`silence_ratio`、`snr_db`、`c50` |
+| `basic_acoustic` | `duration_sec`、`sample_rate_hz`、`channels`、`silence_segments`、`silence_ratio`、`snr_db`、`c50`、`dnsmos_sig`、`dnsmos_bak`、`dnsmos_ovrl`、`dnsmos_p808` |
 | `sound_field_scene` | `far_field`、`rt60`、`c50`、`music`、`sound` |
 | `speaker` | `multi_speaker`、`speaker_change`、`speaker_overlap` |
 | `language_content` | `topic`、`language`、`word_count`、`punctuation`、`repetition`、`filler` |
@@ -83,7 +83,11 @@
     "silence_segments": null,
     "silence_ratio": null,
     "snr_db": null,
-    "c50": null
+    "c50": null,
+    "dnsmos_sig": null,
+    "dnsmos_bak": null,
+    "dnsmos_ovrl": null,
+    "dnsmos_p808": null
   },
   "sound_field_scene": {
     "far_field": null,
@@ -121,3 +125,7 @@
 - 每个公开 tag 必须通过该分组的 registry 暴露给 pipeline。
 - 工具输出先进入内部结果对象，再由 pipeline/auditor 归并成 tags-only 输出。
 - 工具级运行顺序和失败联动不要写在根目录文档；需要说明时，在对应工具目录下新增简短说明文件。
+
+## 下载相关
+- 优先使用国内源
+- 下载失败后终止，并提醒开发者手动下载上传

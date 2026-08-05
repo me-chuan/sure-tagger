@@ -3,12 +3,19 @@
 Fill FIRERED_VAD_MODEL_DIR with the local FireRedVAD non-streaming VAD model
 directory before running silence tagging.
 
+Fill FIRERED_AED_MODEL_DIR with the local FireRedVAD non-streaming AED model
+directory before running music/non-spoken-event tagging.
+
 Fill BROUHAHA_MODEL_PATH with the local Brouhaha checkpoint before running
 SNR/C50 tagging. The default location is inside this project.
 
 Fill RECRIR_* with the local Rec-RIR repository, config, and checkpoint before
 running sound-field RIR/RT60/C50 tagging. The default location is inside this
 project.
+
+Fill DNSMOS_* with the local Microsoft DNSMOS ONNX models before running
+no-reference speech quality tagging. The defaults match the sparse checkout in
+models/DNS-Challenge.
 
 Model tools can run in subprocesses so incompatible model dependencies do not
 need to share one Python environment.
@@ -17,6 +24,8 @@ need to share one Python environment.
 
 FIRERED_VAD_MODEL_DIR = "models/FireRedVAD/pretrained_models/FireRedVAD/VAD"
 FIRERED_VAD_PYTHON = ".runtime/fireredvad_rebuild_py310/bin/python"
+FIRERED_AED_MODEL_DIR = "models/FireRedVAD/pretrained_models/FireRedVAD/AED"
+FIRERED_AED_PYTHON = ".runtime/fireredvad_rebuild_py310/bin/python"
 
 BROUHAHA_REPO_DIR = "models/brouhaha/brouhaha-vad"
 BROUHAHA_MODEL_PATH = "models/brouhaha/brouhaha-vad/models/best/checkpoints/best.ckpt"
@@ -28,3 +37,11 @@ RECRIR_CONFIG_PATH = "models/Rec-RIR/config/Rec-RIR.toml"
 RECRIR_CHECKPOINT_PATH = "models/Rec-RIR/ckpt/epoch35.tar"
 RECRIR_MODEL_VERSION = "github:Audio-WestlakeU/Rec-RIR@27d03a98bc9a5504a76f377147f36dc7ad169ac6"
 RECRIR_PYTHON = ".runtime/recrir_py310_torch271/bin/python"
+
+DNSMOS_PRIMARY_MODEL_PATH = "models/DNS-Challenge/DNSMOS/DNSMOS/sig_bak_ovr.onnx"
+DNSMOS_P808_MODEL_PATH = "models/DNS-Challenge/DNSMOS/DNSMOS/model_v8.onnx"
+DNSMOS_PERSONALIZED_MODEL_PATH = (
+    "models/DNS-Challenge/DNSMOS/pDNSMOS/sig_bak_ovr.onnx"
+)
+DNSMOS_MODEL_VERSION = "github:microsoft/DNS-Challenge@591184a9fcb2cbdec02520fed81a32bbbf9d73ff"
+DNSMOS_PYTHON = ".runtime/recrir_py310_torch271/bin/python"

@@ -2,6 +2,7 @@
 
 from tagger.tools.basic_acoustic import audio_probe
 from tagger.tools.basic_acoustic import brouhaha_signal_estimator
+from tagger.tools.basic_acoustic import dnsmos_quality_estimator
 from tagger.tools.basic_acoustic import firered_vad_silence_detector
 from tagger.tools.basic_acoustic import silence_ratio_calculator
 
@@ -30,9 +31,16 @@ BROUHAHA_ACOUSTIC_TOOL = {
     "run": brouhaha_signal_estimator.run,
 }
 
+DNSMOS_QUALITY_TOOL = {
+    "tag_path": "basic_acoustic",
+    "tool_name": dnsmos_quality_estimator.TOOL_NAME,
+    "run": dnsmos_quality_estimator.run,
+}
+
 BASIC_ACOUSTIC_TOOLS = [
     AUDIO_PROBE_TOOL,
     FIRERED_VAD_SILENCE_TOOL,
     SILENCE_RATIO_TOOL,
     BROUHAHA_ACOUSTIC_TOOL,
+    DNSMOS_QUALITY_TOOL,
 ]

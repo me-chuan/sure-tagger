@@ -41,8 +41,12 @@ def main(argv=None):
 def dispatch(tool_name, request):
     if tool_name == "firered_vad_detect":
         return _run_firered_vad_detect(request)
+    if tool_name == "firered_aed_detect":
+        return _run_firered_aed_detect(request)
     if tool_name == "brouhaha_estimate":
         return _run_brouhaha_estimate(request)
+    if tool_name == "dnsmos_estimate":
+        return _run_dnsmos_estimate(request)
     if tool_name == "recrir_estimate":
         return _run_recrir_estimate(request)
     raise ValueError("unknown subprocess tool: %s" % tool_name)
@@ -58,6 +62,27 @@ def _run_firered_vad_detect(request):
     client = _cached_client("firered_vad_detect", request["config"], FireRedVadClient, config)
     return {
         "speech_segments": client.detect_speech_segments(
+            request["audio_path"],
+            context=None,
+        )
+    }
+
+
+def _run_firered_aed_detect(request):
+    from tagger.tools.sound_field_scene.firered_aed_detector import (
+        FireRedAedClient,
+        FireRedAedConfig,
+    )
+
+    config = FireRedAedConfig(**request["config"])
+    client = _cached_client(
+        "firered_aed_detect",
+        request["config"],
+        FireRedAedClient,
+        config,
+    )
+    return {
+        "output": client.detect_audio_events(
             request["audio_path"],
             context=None,
         )
@@ -81,6 +106,17 @@ def _run_recrir_estimate(request):
     config = RecRirConfig(**request["config"])
     client = _cached_client("recrir_estimate", request["config"], RecRirClient, config)
     return {"output": client.estimate_rir(request["audio_path"], context=None)}
+
+
+def _run_dnsmos_estimate(request):
+    from tagger.tools.basic_acoustic.dnsmos_quality_estimator import (
+        DnsmosClient,
+        DnsmosConfig,
+    )
+
+    config = DnsmosConfig(**request["config"])
+    client = _cached_client("dnsmos_estimate", request["config"], DnsmosClient, config)
+    return {"output": client.estimate(request["audio_path"], context=None)}
 
 
 def _cached_client(tool_name, config_record, client_class, config):

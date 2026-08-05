@@ -1,6 +1,7 @@
 """Registry of sound-field and acoustic-scene tag tools."""
 
 from tagger.tools.sound_field_scene import c50_estimator
+from tagger.tools.sound_field_scene import firered_aed_detector
 from tagger.tools.sound_field_scene import rir_estimator
 from tagger.tools.sound_field_scene import rt60_estimator
 
@@ -23,9 +24,18 @@ C50_TOOL = {
     "run": c50_estimator.run,
 }
 
+FIRERED_AED_TOOL = {
+    "tag_path": "sound_field_scene",
+    "tool_name": firered_aed_detector.TOOL_NAME,
+    "run": firered_aed_detector.run,
+}
+
 RIR_RELATED_TOOLS = [
     RECRIR_RIR_TOOL,
     RT60_TOOL,
     C50_TOOL,
 ]
 
+SOUND_FIELD_SCENE_TOOLS = [
+    FIRERED_AED_TOOL,
+] + RIR_RELATED_TOOLS

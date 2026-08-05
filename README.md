@@ -41,5 +41,21 @@ Run the sample-level signal pipeline on the bundled sample manifest:
 python3 scripts/run_signal.py
 ```
 
+Compare Brouhaha C50 against Rec-RIR-derived C50 on the bundled manifest:
+
+```bash
+python3 scripts/run_c50_method_comparison.py
+```
+
 Model-backed tools require local model directories/checkpoints configured in
 `tagger/local_config.py`.
+
+DNSMOS is configured with Microsoft's local ONNX models under
+`models/DNS-Challenge/DNSMOS/` and runs in the existing Rec-RIR Python 3.10
+environment. Its setup, score mapping, and smoke-test command are documented in
+`tagger/tools/basic_acoustic/README.md`.
+
+FireRed AED uses the local non-streaming AED weights to populate the public
+`sound_field_scene.music` and `sound_field_scene.sound` booleans. Its supported
+event classes, mapping, and smoke-test command are documented in
+`tagger/tools/sound_field_scene/README.md`.

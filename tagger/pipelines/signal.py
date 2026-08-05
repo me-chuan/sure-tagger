@@ -16,18 +16,22 @@ from tagger.input_schema import InputSchemaError, validate_input_record
 from tagger.tools.base import ToolResult
 from tagger.tools.subprocess_runner import close_subprocess_workers
 from tagger.tools.basic_acoustic.brouhaha_signal_estimator import BrouhahaConfig
+from tagger.tools.basic_acoustic.dnsmos_quality_estimator import DnsmosConfig
 from tagger.tools.basic_acoustic.firered_vad_silence_detector import FireRedVadConfig
 from tagger.tools.basic_acoustic.registry import (
     AUDIO_PROBE_TOOL,
     BROUHAHA_ACOUSTIC_TOOL,
+    DNSMOS_QUALITY_TOOL,
     FIRERED_VAD_SILENCE_TOOL,
     SILENCE_RATIO_TOOL,
 )
 from tagger.tools.sound_field_scene.registry import (
     C50_TOOL,
+    FIRERED_AED_TOOL,
     RECRIR_RIR_TOOL,
     RT60_TOOL,
 )
+from tagger.tools.sound_field_scene.firered_aed_detector import FireRedAedConfig
 from tagger.tools.sound_field_scene.rir_estimator import (
     RecRirConfig,
     validate_rir_payload,
@@ -42,6 +46,10 @@ BASIC_ACOUSTIC_FIELDS = {
     "silence_segments": None,
     "snr_db": None,
     "c50": None,
+    "dnsmos_sig": None,
+    "dnsmos_bak": None,
+    "dnsmos_ovrl": None,
+    "dnsmos_p808": None,
 }
 
 SOUND_FIELD_SCENE_FIELDS = {
@@ -74,8 +82,10 @@ def run_manifest(
     brouhaha_config=None,
     recrir_config=None,
     artifact_dir=None,
+    dnsmos_config=None,
+    firered_aed_config=None,
 ):
-    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[Union[str, Path]]) -> Dict[str, Any]
+    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[Union[str, Path]], Optional[DnsmosConfig], Optional[FireRedAedConfig]) -> Dict[str, Any]
     manifest = Path(manifest_path)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -99,6 +109,8 @@ def run_manifest(
                         firered_vad_config=firered_vad_config,
                         brouhaha_config=brouhaha_config,
                         recrir_config=recrir_config,
+                        dnsmos_config=dnsmos_config,
+                        firered_aed_config=firered_aed_config,
                         artifact_dir=artifact_root,
                         artifact_record_index=row_index,
                         tool_context=tool_context,
@@ -131,8 +143,12 @@ def tag_record(
     recrir_config=None,
     recrir_client=None,
     artifact_dir=None,
+    dnsmos_config=None,
+    dnsmos_client=None,
+    firered_aed_config=None,
+    firered_aed_client=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Any, Optional[Union[str, Path]]) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Any, Optional[Union[str, Path]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any) -> Dict[str, Any]
     return _tag_record_internal(
         record,
         manifest_dir,
@@ -141,6 +157,10 @@ def tag_record(
         recrir_config=recrir_config,
         recrir_client=recrir_client,
         artifact_dir=artifact_dir,
+        dnsmos_config=dnsmos_config,
+        dnsmos_client=dnsmos_client,
+        firered_aed_config=firered_aed_config,
+        firered_aed_client=firered_aed_client,
     )["tags"]
 
 
@@ -154,8 +174,12 @@ def _tag_record_internal(
     artifact_dir=None,
     artifact_record_index=None,
     tool_context=None,
+    dnsmos_config=None,
+    dnsmos_client=None,
+    firered_aed_config=None,
+    firered_aed_client=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]]) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any) -> Dict[str, Any]
     validate_input_record(record)
     sample = record["sample"]
     sample_id = sample["sample_id"]
@@ -209,6 +233,26 @@ def _tag_record_internal(
             warnings,
             sample_id,
             brouhaha_config=brouhaha_config,
+        )
+        _run_dnsmos_tool(
+            audio_path,
+            tool_context,
+            tags,
+            internal_results,
+            warnings,
+            sample_id,
+            dnsmos_config=dnsmos_config,
+            dnsmos_client=dnsmos_client,
+        )
+        _run_firered_aed_tool(
+            audio_path,
+            tool_context,
+            tags,
+            internal_results,
+            warnings,
+            sample_id,
+            firered_aed_config=firered_aed_config,
+            firered_aed_client=firered_aed_client,
         )
         _run_recrir_tools(
             audio_path,
@@ -412,6 +456,96 @@ def _run_brouhaha_tool(
         tags["basic_acoustic"]["c50"] = None
 
 
+def _run_dnsmos_tool(
+    audio_path,
+    tool_context,
+    tags,
+    internal_results,
+    warnings,
+    sample_id,
+    dnsmos_config=None,
+    dnsmos_client=None,
+):
+    try:
+        results = DNSMOS_QUALITY_TOOL["run"](
+            audio_path,
+            context=tool_context,
+            config=dnsmos_config,
+            client=dnsmos_client,
+        )
+        for result in results:
+            apply_result(tags, internal_results, result)
+            if result.status != "estimated":
+                warnings.append(
+                    {
+                        "type": "dnsmos_output_invalid",
+                        "message": result.evidence.get("error", "invalid output"),
+                        "sample_id": sample_id,
+                        "audio_path": str(audio_path),
+                        "tool_name": DNSMOS_QUALITY_TOOL["tool_name"],
+                        "field": result.tag_path,
+                    }
+                )
+    except Exception as exc:  # noqa: BLE001 - no non-DNSMOS fallback is allowed.
+        warnings.append(
+            {
+                "type": "dnsmos_error",
+                "message": str(exc),
+                "sample_id": sample_id,
+                "audio_path": str(audio_path),
+                "tool_name": DNSMOS_QUALITY_TOOL["tool_name"],
+            }
+        )
+        _null_dnsmos_tags(tags)
+
+
+def _run_firered_aed_tool(
+    audio_path,
+    tool_context,
+    tags,
+    internal_results,
+    warnings,
+    sample_id,
+    firered_aed_config=None,
+    firered_aed_client=None,
+):
+    duration_sec = tags["basic_acoustic"]["duration_sec"]
+    if duration_sec is None or duration_sec <= 0:
+        warnings.append(
+            {
+                "type": "invalid_duration_for_firered_aed",
+                "message": "duration_sec must be positive before FireRed AED",
+                "sample_id": sample_id,
+                "audio_path": str(audio_path),
+                "tool_name": FIRERED_AED_TOOL["tool_name"],
+            }
+        )
+        _null_firered_aed_tags(tags)
+        return
+
+    try:
+        results = FIRERED_AED_TOOL["run"](
+            audio_path,
+            duration_sec=duration_sec,
+            context=tool_context,
+            config=firered_aed_config,
+            client=firered_aed_client,
+        )
+        for result in results:
+            apply_result(tags, internal_results, result)
+    except Exception as exc:  # noqa: BLE001 - no non-FireRed fallback is allowed.
+        warnings.append(
+            {
+                "type": "firered_aed_error",
+                "message": str(exc),
+                "sample_id": sample_id,
+                "audio_path": str(audio_path),
+                "tool_name": FIRERED_AED_TOOL["tool_name"],
+            }
+        )
+        _null_firered_aed_tags(tags)
+
+
 def _run_recrir_tools(
     audio_path,
     tool_context,
@@ -505,6 +639,16 @@ def _null_rir_related_tags(tags):
     tags["sound_field_scene"]["c50"] = None
 
 
+def _null_dnsmos_tags(tags):
+    for field in ("dnsmos_sig", "dnsmos_bak", "dnsmos_ovrl", "dnsmos_p808"):
+        tags["basic_acoustic"][field] = None
+
+
+def _null_firered_aed_tags(tags):
+    tags["sound_field_scene"]["music"] = None
+    tags["sound_field_scene"]["sound"] = None
+
+
 def write_rir_artifact(rir_payload, artifact_dir, sample_key):
     # type: (Dict[str, Any], Union[str, Path], str) -> Path
     payload = validate_rir_payload(rir_payload)
@@ -554,6 +698,10 @@ def compare_native_metadata_basic_acoustic_fields(sample, observed_basic_acousti
         ("silence_segments", None),
         ("snr_db", 1e-6),
         ("c50", 1e-6),
+        ("dnsmos_sig", 1e-6),
+        ("dnsmos_bak", 1e-6),
+        ("dnsmos_ovrl", 1e-6),
+        ("dnsmos_p808", 1e-6),
     ]
     for field, tolerance in comparisons:
         native_value = native_metadata.get(field)
@@ -701,6 +849,20 @@ def audit_basic_acoustic(basic_acoustic):
         basic_acoustic["c50"] = None
         warnings.append({"type": "invalid_basic_acoustic_value", "field": "c50"})
 
+    for field in ("dnsmos_sig", "dnsmos_bak", "dnsmos_ovrl", "dnsmos_p808"):
+        value = basic_acoustic.get(field)
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not _is_finite_number(value)
+            or value < 1.0
+            or value > 5.0
+        ):
+            basic_acoustic[field] = None
+            warnings.append(
+                {"type": "invalid_basic_acoustic_value", "field": field}
+            )
+
     return warnings
 
 
@@ -794,6 +956,11 @@ def build_arg_parser():
         help="Use GPU in FireRedVAD config. Defaults to CPU.",
     )
     parser.add_argument(
+        "--firered-aed-use-gpu",
+        action="store_true",
+        help="Use GPU in FireRed AED config. Defaults to CPU.",
+    )
+    parser.add_argument(
         "--brouhaha-use-gpu",
         action="store_true",
         help="Use GPU in Brouhaha config. Defaults to CPU when supported.",
@@ -809,6 +976,11 @@ def build_arg_parser():
         help="Python executable for FireRed VAD subprocess. Defaults to local_config.py.",
     )
     parser.add_argument(
+        "--firered-aed-python",
+        default=None,
+        help="Python executable for FireRed AED subprocess. Defaults to local_config.py.",
+    )
+    parser.add_argument(
         "--brouhaha-python",
         default=None,
         help="Python executable for Brouhaha subprocess. Defaults to local_config.py.",
@@ -817,6 +989,16 @@ def build_arg_parser():
         "--recrir-python",
         default=None,
         help="Python executable for Rec-RIR subprocess. Defaults to local_config.py.",
+    )
+    parser.add_argument(
+        "--dnsmos-python",
+        default=None,
+        help="Python executable for DNSMOS subprocess. Defaults to local_config.py.",
+    )
+    parser.add_argument(
+        "--dnsmos-personalized",
+        action="store_true",
+        help="Use the personalized DNSMOS primary model. Defaults to regular DNSMOS.",
     )
     parser.add_argument(
         "--artifact-dir",
@@ -836,6 +1018,10 @@ def main(argv=None):
         use_gpu=args.firered_vad_use_gpu,
         subprocess_python=args.firered_vad_python,
     )
+    firered_aed_config = FireRedAedConfig(
+        use_gpu=args.firered_aed_use_gpu,
+        subprocess_python=args.firered_aed_python,
+    )
     brouhaha_config = BrouhahaConfig(
         use_gpu=args.brouhaha_use_gpu,
         subprocess_python=args.brouhaha_python,
@@ -844,6 +1030,10 @@ def main(argv=None):
         use_gpu=args.recrir_use_gpu,
         subprocess_python=args.recrir_python,
     )
+    dnsmos_config = DnsmosConfig(
+        personalized=args.dnsmos_personalized,
+        subprocess_python=args.dnsmos_python,
+    )
     summary = run_manifest(
         args.manifest,
         args.output,
@@ -851,6 +1041,8 @@ def main(argv=None):
         brouhaha_config=brouhaha_config,
         recrir_config=recrir_config,
         artifact_dir=args.artifact_dir,
+        dnsmos_config=dnsmos_config,
+        firered_aed_config=firered_aed_config,
     )
     public_summary = {
         "output_path": summary["output_path"],
