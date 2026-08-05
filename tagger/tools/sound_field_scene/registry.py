@@ -2,6 +2,7 @@
 
 from tagger.tools.sound_field_scene import c50_estimator
 from tagger.tools.sound_field_scene import firered_aed_detector
+from tagger.tools.sound_field_scene import panns_background_detector
 from tagger.tools.sound_field_scene import rir_estimator
 from tagger.tools.sound_field_scene import rt60_estimator
 
@@ -30,6 +31,12 @@ FIRERED_AED_TOOL = {
     "run": firered_aed_detector.run,
 }
 
+PANNS_BACKGROUND_TOOL = {
+    "tag_path": "sound_field_scene.sound",
+    "tool_name": panns_background_detector.TOOL_NAME,
+    "run": panns_background_detector.run,
+}
+
 RIR_RELATED_TOOLS = [
     RECRIR_RIR_TOOL,
     RT60_TOOL,
@@ -38,4 +45,5 @@ RIR_RELATED_TOOLS = [
 
 SOUND_FIELD_SCENE_TOOLS = [
     FIRERED_AED_TOOL,
+    PANNS_BACKGROUND_TOOL,
 ] + RIR_RELATED_TOOLS

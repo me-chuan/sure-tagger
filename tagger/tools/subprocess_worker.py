@@ -43,6 +43,8 @@ def dispatch(tool_name, request):
         return _run_firered_vad_detect(request)
     if tool_name == "firered_aed_detect":
         return _run_firered_aed_detect(request)
+    if tool_name == "panns_background_estimate":
+        return _run_panns_background_estimate(request)
     if tool_name == "brouhaha_estimate":
         return _run_brouhaha_estimate(request)
     if tool_name == "dnsmos_estimate":
@@ -87,6 +89,22 @@ def _run_firered_aed_detect(request):
             context=None,
         )
     }
+
+
+def _run_panns_background_estimate(request):
+    from tagger.tools.sound_field_scene.panns_background_detector import (
+        PannsBackgroundClient,
+        PannsBackgroundConfig,
+    )
+
+    config = PannsBackgroundConfig(**request["config"])
+    client = _cached_client(
+        "panns_background_estimate",
+        request["config"],
+        PannsBackgroundClient,
+        config,
+    )
+    return {"output": client.estimate(request["audio_path"], context=None)}
 
 
 def _run_brouhaha_estimate(request):

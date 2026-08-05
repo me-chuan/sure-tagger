@@ -7,6 +7,8 @@ inputs.
 ## Repository Layout
 
 - `tagger/`: core schemas, tag tools, and pipelines.
+- `docs/`: user-facing documentation, including the
+  [tag definitions, methods, and JSON examples](docs/tags-and-methods.md).
 - `scripts/`: runnable pipeline entry points.
 - `tests/`: unit and smoke tests.
 - `phase1_asr_samples/`: small local demo samples and manifests.
@@ -50,12 +52,7 @@ python3 scripts/run_c50_method_comparison.py
 Model-backed tools require local model directories/checkpoints configured in
 `tagger/local_config.py`.
 
-DNSMOS is configured with Microsoft's local ONNX models under
-`models/DNS-Challenge/DNSMOS/` and runs in the existing Rec-RIR Python 3.10
-environment. Its setup, score mapping, and smoke-test command are documented in
-`tagger/tools/basic_acoustic/README.md`.
-
-FireRed AED uses the local non-streaming AED weights to populate the public
-`sound_field_scene.music` and `sound_field_scene.sound` booleans. Its supported
-event classes, mapping, and smoke-test command are documented in
+See [the tag and method documentation](docs/tags-and-methods.md) for the public
+fields, preprocessing, and JSON examples. Tool-specific setup details are kept
+in `tagger/tools/basic_acoustic/README.md` and
 `tagger/tools/sound_field_scene/README.md`.

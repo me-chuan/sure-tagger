@@ -13,7 +13,7 @@
 | 分组 | 字段 |
 | --- | --- |
 | `basic_acoustic` | `duration_sec`、`sample_rate_hz`、`channels`、`silence_segments`、`silence_ratio`、`snr_db`、`c50`、`dnsmos_sig`、`dnsmos_bak`、`dnsmos_ovrl`、`dnsmos_p808` |
-| `sound_field_scene` | `far_field`、`rt60`、`c50`、`music`、`sound` |
+| `sound_field_scene` | `far_field`、`rt60`、`c50`、`audio_events`、`music`、`sound` |
 | `speaker` | `multi_speaker`、`speaker_change`、`speaker_overlap` |
 | `language_content` | `topic`、`language`、`word_count`、`punctuation`、`repetition`、`filler` |
 
@@ -93,6 +93,7 @@
     "far_field": null,
     "rt60": null,
     "c50": null,
+    "audio_events": null,
     "music": null,
     "sound": null
   },
@@ -116,6 +117,7 @@
 
 - 最终输出不得包含 raw input、`sample_id`、工具标识、方法、状态、来源、证据、置信度、warning、rationale、prompt、模型名或审计结论。
 - Rec-RIR 生成的 RIR 波形不得进入公开输出；pipeline 只公开由该波形计算出的 `sound_field_scene.rt60` 和 `sound_field_scene.c50`，波形保存为内部 artifact。
+- `sound_field_scene.audio_events` 是 FireRed AED 检出的 `speech`、`singing`、`music` 类别数组；`sound_field_scene.sound` 是 PANNs 达到阈值的 AudioSet 背景声显示名称数组。成功但没有检出时输出空数组，工具失败时输出 `null`；模型分数、比例和时间段不进入公开输出。
 - 字段缺失、无法可靠判断或对应程序输出非法时，字段值必须为 `null`。
 - 同名字段如果位于不同路径，按不同 tag 处理。例如 `basic_acoustic.c50` 和 `sound_field_scene.c50` 不得跨字段复制，除非 registry 明确登记同一程序同时产出两个字段。
 

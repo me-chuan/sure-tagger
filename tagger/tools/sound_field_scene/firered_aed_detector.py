@@ -1,9 +1,8 @@
-"""FireRed non-streaming audio event detector.
+"""FireRed non-streaming audio-event detector.
 
-FireRed AED recognizes speech, singing, and music. The public boolean tags keep
-the existing schema: ``music`` means a music event was found, while ``sound``
-means at least one non-spoken event (singing or music) was found. Validated
-segments and upstream frame ratios remain internal evidence.
+FireRed AED recognizes speech, singing, and music. Detected event names and the
+backward-compatible music decision are public; event segments and frame ratios
+remain internal evidence.
 """
 
 from pathlib import Path
@@ -91,8 +90,8 @@ class FireRedAedConfig:
             {
                 "supported_sample_rate_hz": SUPPORTED_SAMPLE_RATE_HZ,
                 "public_mapping": {
+                    "audio_events": "detected event names in model class order",
                     "music": "music event present",
-                    "sound": "singing or music event present",
                 },
                 "subprocess_python": self.subprocess_python,
             }
@@ -209,11 +208,10 @@ def run(audio_path, duration_sec, context=None, config=None, client=None, **_kwa
     raw_output = client.detect_audio_events(audio_path, context)
     event_segments, event_ratios = validate_aed_output(raw_output, duration_sec)
 
+    audio_events = [name for name in EVENT_NAMES if event_segments[name]]
     values = {
-        "sound_field_scene.music": bool(event_segments["music"]),
-        "sound_field_scene.sound": bool(
-            event_segments["singing"] or event_segments["music"]
-        ),
+        "sound_field_scene.audio_events": audio_events,
+        "sound_field_scene.music": "music" in audio_events,
     }
     evidence = {
         "config": config.to_record(),

@@ -28,10 +28,18 @@ from tagger.tools.basic_acoustic.registry import (
 from tagger.tools.sound_field_scene.registry import (
     C50_TOOL,
     FIRERED_AED_TOOL,
+    PANNS_BACKGROUND_TOOL,
     RECRIR_RIR_TOOL,
     RT60_TOOL,
 )
-from tagger.tools.sound_field_scene.firered_aed_detector import FireRedAedConfig
+from tagger.tools.sound_field_scene.firered_aed_detector import (
+    EVENT_NAMES,
+    FireRedAedConfig,
+)
+from tagger.tools.sound_field_scene.panns_background_detector import (
+    TOP_EVENTS_LIMIT,
+    PannsBackgroundConfig,
+)
 from tagger.tools.sound_field_scene.rir_estimator import (
     RecRirConfig,
     validate_rir_payload,
@@ -56,6 +64,7 @@ SOUND_FIELD_SCENE_FIELDS = {
     "far_field": None,
     "rt60": None,
     "c50": None,
+    "audio_events": None,
     "music": None,
     "sound": None,
 }
@@ -84,8 +93,9 @@ def run_manifest(
     artifact_dir=None,
     dnsmos_config=None,
     firered_aed_config=None,
+    panns_config=None,
 ):
-    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[Union[str, Path]], Optional[DnsmosConfig], Optional[FireRedAedConfig]) -> Dict[str, Any]
+    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[Union[str, Path]], Optional[DnsmosConfig], Optional[FireRedAedConfig], Optional[PannsBackgroundConfig]) -> Dict[str, Any]
     manifest = Path(manifest_path)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -111,6 +121,7 @@ def run_manifest(
                         recrir_config=recrir_config,
                         dnsmos_config=dnsmos_config,
                         firered_aed_config=firered_aed_config,
+                        panns_config=panns_config,
                         artifact_dir=artifact_root,
                         artifact_record_index=row_index,
                         tool_context=tool_context,
@@ -147,8 +158,10 @@ def tag_record(
     dnsmos_client=None,
     firered_aed_config=None,
     firered_aed_client=None,
+    panns_config=None,
+    panns_client=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Any, Optional[Union[str, Path]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Any, Optional[Union[str, Path]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[PannsBackgroundConfig], Any) -> Dict[str, Any]
     return _tag_record_internal(
         record,
         manifest_dir,
@@ -161,6 +174,8 @@ def tag_record(
         dnsmos_client=dnsmos_client,
         firered_aed_config=firered_aed_config,
         firered_aed_client=firered_aed_client,
+        panns_config=panns_config,
+        panns_client=panns_client,
     )["tags"]
 
 
@@ -178,8 +193,10 @@ def _tag_record_internal(
     dnsmos_client=None,
     firered_aed_config=None,
     firered_aed_client=None,
+    panns_config=None,
+    panns_client=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[PannsBackgroundConfig], Any) -> Dict[str, Any]
     validate_input_record(record)
     sample = record["sample"]
     sample_id = sample["sample_id"]
@@ -253,6 +270,16 @@ def _tag_record_internal(
             sample_id,
             firered_aed_config=firered_aed_config,
             firered_aed_client=firered_aed_client,
+        )
+        _run_panns_background_tool(
+            audio_path,
+            tool_context,
+            tags,
+            internal_results,
+            warnings,
+            sample_id,
+            panns_config=panns_config,
+            panns_client=panns_client,
         )
         _run_recrir_tools(
             audio_path,
@@ -546,6 +573,37 @@ def _run_firered_aed_tool(
         _null_firered_aed_tags(tags)
 
 
+def _run_panns_background_tool(
+    audio_path,
+    tool_context,
+    tags,
+    internal_results,
+    warnings,
+    sample_id,
+    panns_config=None,
+    panns_client=None,
+):
+    try:
+        result = PANNS_BACKGROUND_TOOL["run"](
+            audio_path,
+            context=tool_context,
+            config=panns_config,
+            client=panns_client,
+        )
+        apply_result(tags, internal_results, result)
+    except Exception as exc:  # noqa: BLE001 - no non-PANNs fallback is allowed.
+        warnings.append(
+            {
+                "type": "panns_background_error",
+                "message": str(exc),
+                "sample_id": sample_id,
+                "audio_path": str(audio_path),
+                "tool_name": PANNS_BACKGROUND_TOOL["tool_name"],
+            }
+        )
+        _null_panns_background_tag(tags)
+
+
 def _run_recrir_tools(
     audio_path,
     tool_context,
@@ -645,7 +703,11 @@ def _null_dnsmos_tags(tags):
 
 
 def _null_firered_aed_tags(tags):
+    tags["sound_field_scene"]["audio_events"] = None
     tags["sound_field_scene"]["music"] = None
+
+
+def _null_panns_background_tag(tags):
     tags["sound_field_scene"]["sound"] = None
 
 
@@ -737,6 +799,7 @@ def compare_native_metadata_sound_field_scene_fields(sample, observed_sound_fiel
         ("far_field", None),
         ("rt60", 1e-6),
         ("c50", 1e-6),
+        ("audio_events", None),
         ("music", None),
         ("sound", None),
     ]
@@ -870,13 +933,50 @@ def audit_sound_field_scene(sound_field_scene):
     # type: (Dict[str, Any]) -> List[Dict[str, Any]]
     warnings = []  # type: List[Dict[str, Any]]
 
-    for field in ("far_field", "music", "sound"):
+    for field in ("far_field", "music"):
         value = sound_field_scene.get(field)
         if value is not None and not isinstance(value, bool):
             sound_field_scene[field] = None
             warnings.append(
                 {"type": "invalid_sound_field_scene_value", "field": field}
             )
+
+    audio_events = sound_field_scene.get("audio_events")
+    if audio_events is not None and not _is_valid_label_list(
+        audio_events,
+        allowed=EVENT_NAMES,
+        require_allowed_order=True,
+    ):
+        sound_field_scene["audio_events"] = None
+        warnings.append(
+            {"type": "invalid_sound_field_scene_value", "field": "audio_events"}
+        )
+
+    sound = sound_field_scene.get("sound")
+    if sound is not None and not _is_valid_label_list(
+        sound,
+        max_items=TOP_EVENTS_LIMIT,
+    ):
+        sound_field_scene["sound"] = None
+        warnings.append(
+            {"type": "invalid_sound_field_scene_value", "field": "sound"}
+        )
+
+    music = sound_field_scene.get("music")
+    audio_events = sound_field_scene.get("audio_events")
+    if (
+        music is not None
+        and audio_events is not None
+        and music != ("music" in audio_events)
+    ):
+        sound_field_scene["audio_events"] = None
+        sound_field_scene["music"] = None
+        warnings.append(
+            {
+                "type": "inconsistent_sound_field_scene_values",
+                "fields": ["audio_events", "music"],
+            }
+        )
 
     rt60 = sound_field_scene.get("rt60")
     if rt60 is not None and (
@@ -898,6 +998,32 @@ def audit_sound_field_scene(sound_field_scene):
         warnings.append({"type": "invalid_sound_field_scene_value", "field": "c50"})
 
     return warnings
+
+
+def _is_valid_label_list(
+    value,
+    allowed=None,
+    max_items=None,
+    require_allowed_order=False,
+):
+    if not isinstance(value, list):
+        return False
+    if max_items is not None and len(value) > max_items:
+        return False
+    if any(
+        not isinstance(label, str) or not label or label != label.strip()
+        for label in value
+    ):
+        return False
+    if len(set(value)) != len(value):
+        return False
+    if allowed is not None:
+        allowed = tuple(allowed)
+        if any(label not in allowed for label in value):
+            return False
+        if require_allowed_order:
+            return value == [label for label in allowed if label in value]
+    return True
 
 
 def _is_valid_silence_segments(segments, duration_sec):
@@ -961,6 +1087,17 @@ def build_arg_parser():
         help="Use GPU in FireRed AED config. Defaults to CPU.",
     )
     parser.add_argument(
+        "--panns-use-gpu",
+        action="store_true",
+        help="Use GPU for PANNs background-sound inference. Defaults to CPU.",
+    )
+    parser.add_argument(
+        "--panns-threshold",
+        type=float,
+        default=0.30,
+        help="PANNs background-sound probability threshold. Defaults to 0.30.",
+    )
+    parser.add_argument(
         "--brouhaha-use-gpu",
         action="store_true",
         help="Use GPU in Brouhaha config. Defaults to CPU when supported.",
@@ -979,6 +1116,11 @@ def build_arg_parser():
         "--firered-aed-python",
         default=None,
         help="Python executable for FireRed AED subprocess. Defaults to local_config.py.",
+    )
+    parser.add_argument(
+        "--panns-python",
+        default=None,
+        help="Python executable for PANNs subprocess. Defaults to local_config.py.",
     )
     parser.add_argument(
         "--brouhaha-python",
@@ -1022,6 +1164,11 @@ def main(argv=None):
         use_gpu=args.firered_aed_use_gpu,
         subprocess_python=args.firered_aed_python,
     )
+    panns_config = PannsBackgroundConfig(
+        use_gpu=args.panns_use_gpu,
+        threshold=args.panns_threshold,
+        subprocess_python=args.panns_python,
+    )
     brouhaha_config = BrouhahaConfig(
         use_gpu=args.brouhaha_use_gpu,
         subprocess_python=args.brouhaha_python,
@@ -1043,6 +1190,7 @@ def main(argv=None):
         artifact_dir=args.artifact_dir,
         dnsmos_config=dnsmos_config,
         firered_aed_config=firered_aed_config,
+        panns_config=panns_config,
     )
     public_summary = {
         "output_path": summary["output_path"],

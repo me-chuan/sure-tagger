@@ -4,7 +4,10 @@ Fill FIRERED_VAD_MODEL_DIR with the local FireRedVAD non-streaming VAD model
 directory before running silence tagging.
 
 Fill FIRERED_AED_MODEL_DIR with the local FireRedVAD non-streaming AED model
-directory before running music/non-spoken-event tagging.
+directory before running music tagging.
+
+Fill PANNS_* with the pinned AudioSet tagging repository, Cnn14 checkpoint, and
+dedicated Python environment before running background-sound tagging.
 
 Fill BROUHAHA_MODEL_PATH with the local Brouhaha checkpoint before running
 SNR/C50 tagging. The default location is inside this project.
@@ -26,6 +29,16 @@ FIRERED_VAD_MODEL_DIR = "models/FireRedVAD/pretrained_models/FireRedVAD/VAD"
 FIRERED_VAD_PYTHON = ".runtime/fireredvad_rebuild_py310/bin/python"
 FIRERED_AED_MODEL_DIR = "models/FireRedVAD/pretrained_models/FireRedVAD/AED"
 FIRERED_AED_PYTHON = ".runtime/fireredvad_rebuild_py310/bin/python"
+
+PANNS_REPO_DIR = "models/audioset_tagging_cnn"
+PANNS_CHECKPOINT_PATH = (
+    "models/audioset_tagging_cnn/checkpoints/Cnn14_mAP=0.431.pth"
+)
+PANNS_MODEL_VERSION = (
+    "github:qiuqiangkong/audioset_tagging_cnn"
+    "@d2f4b8c18eab44737fcc0de1248ae21eb43f6aa4"
+)
+PANNS_PYTHON = ".runtime/panns_py310/bin/python"
 
 BROUHAHA_REPO_DIR = "models/brouhaha/brouhaha-vad"
 BROUHAHA_MODEL_PATH = "models/brouhaha/brouhaha-vad/models/best/checkpoints/best.ckpt"

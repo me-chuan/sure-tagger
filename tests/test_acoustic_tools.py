@@ -44,6 +44,13 @@ from tagger.tools.sound_field_scene.firered_aed_detector import (
     run as run_firered_aed_detector,
     validate_aed_output,
 )
+from tagger.tools.sound_field_scene.panns_background_detector import (
+    PannsBackgroundConfig,
+    PannsBackgroundError,
+    run as run_panns_background_detector,
+    select_background_events,
+    validate_panns_output,
+)
 from tagger.tools.sound_field_scene.rir_estimator import (
     RecRirConfig,
     RecRirError,
@@ -130,6 +137,13 @@ class AcousticToolsTest(unittest.TestCase):
                         },
                     }
                 ),
+                panns_config=PannsBackgroundConfig(
+                    threshold=0.3,
+                    subprocess_python="",
+                ),
+                panns_client=FakePannsBackgroundClient(
+                    make_panns_output(0.6, "/m/0btp2", "Traffic noise")
+                ),
             )
 
             self.assertEqual(
@@ -174,12 +188,25 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertEqual(tags["basic_acoustic"]["dnsmos_p808"], 3.8)
             self.assertEqual(
                 set(tags["sound_field_scene"].keys()),
-                set(["far_field", "rt60", "c50", "music", "sound"]),
+                set(
+                    [
+                        "far_field",
+                        "rt60",
+                        "c50",
+                        "audio_events",
+                        "music",
+                        "sound",
+                    ]
+                ),
             )
             self.assertIsNone(tags["sound_field_scene"]["rt60"])
             self.assertIsNone(tags["sound_field_scene"]["c50"])
+            self.assertEqual(
+                tags["sound_field_scene"]["audio_events"],
+                ["speech", "music"],
+            )
             self.assertTrue(tags["sound_field_scene"]["music"])
-            self.assertTrue(tags["sound_field_scene"]["sound"])
+            self.assertEqual(tags["sound_field_scene"]["sound"], ["Traffic noise"])
 
     def test_fire_red_speech_segments_convert_to_silence_segments(self):
         segments = speech_segments_to_silence_segments(
@@ -218,7 +245,7 @@ class AcousticToolsTest(unittest.TestCase):
                 ],
             )
 
-    def test_fire_red_aed_maps_validated_events_to_public_booleans(self):
+    def test_fire_red_aed_maps_event_names_and_music_to_public_tags(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "tone.wav"
             write_test_wav(path, sample_rate=16000, channels=1, duration_sec=2.0)
@@ -248,14 +275,20 @@ class AcousticToolsTest(unittest.TestCase):
             )
 
             by_path = {result.tag_path: result for result in results}
-            self.assertFalse(by_path["sound_field_scene.music"].value)
-            self.assertTrue(by_path["sound_field_scene.sound"].value)
             self.assertEqual(
-                by_path["sound_field_scene.sound"].evidence["event_segments"][
-                    "singing"
-                ],
-                [{"start_sec": 0.5, "end_sec": 1.0}],
+                set(by_path),
+                set(
+                    [
+                        "sound_field_scene.audio_events",
+                        "sound_field_scene.music",
+                    ]
+                ),
             )
+            self.assertEqual(
+                by_path["sound_field_scene.audio_events"].value,
+                ["speech", "singing"],
+            )
+            self.assertFalse(by_path["sound_field_scene.music"].value)
             self.assertEqual(
                 by_path["sound_field_scene.music"].evidence["event_ratios"][
                     "speech"
@@ -279,6 +312,106 @@ class AcousticToolsTest(unittest.TestCase):
                     },
                 },
                 duration_sec=1.0,
+            )
+
+    def test_fire_red_aed_returns_empty_event_list_when_nothing_is_detected(self):
+        output = {
+            "event2timestamps": {"speech": [], "singing": [], "music": []},
+            "event2ratio": {"speech": 0.0, "singing": 0.0, "music": 0.0},
+        }
+        results = run_firered_aed_detector(
+            "audio.wav",
+            duration_sec=1.0,
+            config=FireRedAedConfig(subprocess_python=""),
+            client=FakeFireRedAedClient(output),
+        )
+        by_path = {result.tag_path: result.value for result in results}
+
+        self.assertEqual(by_path["sound_field_scene.audio_events"], [])
+        self.assertFalse(by_path["sound_field_scene.music"])
+
+    def test_panns_background_detector_uses_inclusive_threshold(self):
+        result = run_panns_background_detector(
+            "audio.wav",
+            config=PannsBackgroundConfig(threshold=0.3, subprocess_python=""),
+            client=FakePannsBackgroundClient(
+                make_panns_output(0.3, "/m/04rlf", "Music")
+            ),
+        )
+
+        self.assertEqual(result.tag_path, "sound_field_scene.sound")
+        self.assertEqual(result.value, ["Music"])
+        self.assertEqual(result.evidence["max_background_score"], 0.3)
+        self.assertEqual(result.evidence["winning_event"]["mid"], "/m/04rlf")
+
+    def test_panns_background_detector_returns_empty_list_below_threshold(self):
+        result = run_panns_background_detector(
+            "audio.wav",
+            config=PannsBackgroundConfig(threshold=0.3, subprocess_python=""),
+            client=FakePannsBackgroundClient(
+                make_panns_output(0.299999, "/m/0btp2", "Traffic noise")
+            ),
+        )
+
+        self.assertEqual(result.value, [])
+
+    def test_panns_background_detector_returns_ranked_classes_above_threshold(self):
+        events = [
+            {
+                "index": 1,
+                "mid": "/m/0btp2",
+                "display_name": "Traffic noise",
+                "score": 0.7,
+            },
+            {
+                "index": 2,
+                "mid": "/m/07yv9",
+                "display_name": "Vehicle",
+                "score": 0.4,
+            },
+            {
+                "index": 3,
+                "mid": "/m/096m7z",
+                "display_name": "Noise",
+                "score": 0.2,
+            },
+        ]
+        result = run_panns_background_detector(
+            "audio.wav",
+            config=PannsBackgroundConfig(threshold=0.3, subprocess_python=""),
+            client=FakePannsBackgroundClient(
+                {
+                    "chunk_count": 1,
+                    "max_background_score": 0.7,
+                    "winning_event": dict(events[0]),
+                    "top_background_events": events,
+                }
+            ),
+        )
+
+        self.assertEqual(result.value, ["Traffic noise", "Vehicle"])
+
+    def test_panns_background_selection_excludes_primary_speech_and_scene(self):
+        summary = select_background_events(
+            [
+                {"index": 0, "mid": "/m/09x0r", "display_name": "Speech"},
+                {
+                    "index": 1,
+                    "mid": "/t/dd00125",
+                    "display_name": "Inside, small room",
+                },
+                {"index": 2, "mid": "/m/04rlf", "display_name": "Music"},
+            ],
+            [0.99, 0.95, 0.31],
+        )
+
+        self.assertEqual(summary["max_background_score"], 0.31)
+        self.assertEqual(summary["winning_event"]["mid"], "/m/04rlf")
+
+    def test_panns_background_output_rejects_excluded_winner(self):
+        with self.assertRaises(PannsBackgroundError):
+            validate_panns_output(
+                make_panns_output(0.9, "/m/09x0r", "Speech")
             )
 
     def test_silence_ratio_is_calculated_from_segments_and_duration(self):
@@ -534,6 +667,7 @@ class AcousticToolsTest(unittest.TestCase):
             "far_field": None,
             "rt60": -1.0,
             "c50": float("nan"),
+            "audio_events": None,
             "music": None,
             "sound": None,
         }
@@ -548,6 +682,25 @@ class AcousticToolsTest(unittest.TestCase):
                 {"type": "invalid_sound_field_scene_value", "field": "rt60"},
                 {"type": "invalid_sound_field_scene_value", "field": "c50"},
             ],
+        )
+
+    def test_sound_field_auditor_rejects_invalid_event_label_lists(self):
+        sound_field_scene = {
+            "far_field": None,
+            "rt60": None,
+            "c50": None,
+            "audio_events": ["music", "speech"],
+            "music": True,
+            "sound": True,
+        }
+
+        warnings = audit_sound_field_scene(sound_field_scene)
+
+        self.assertIsNone(sound_field_scene["audio_events"])
+        self.assertIsNone(sound_field_scene["sound"])
+        self.assertEqual(
+            [warning["field"] for warning in warnings],
+            ["audio_events", "sound"],
         )
 
     def test_basic_acoustic_auditor_rejects_invalid_dnsmos_scores(self):
@@ -618,6 +771,13 @@ class AcousticToolsTest(unittest.TestCase):
                         },
                     }
                 ),
+                panns_config=PannsBackgroundConfig(
+                    threshold=0.3,
+                    subprocess_python="",
+                ),
+                panns_client=FakePannsBackgroundClient(
+                    make_panns_output(0.4, "/m/096m7z", "Noise")
+                ),
             )
 
             self.assertEqual(tags["basic_acoustic"]["sample_rate_hz"], 8000)
@@ -626,6 +786,9 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertIsNotNone(tags["sound_field_scene"]["rt60"])
             self.assertIsNotNone(tags["sound_field_scene"]["c50"])
             self.assertIsNone(tags["basic_acoustic"]["c50"])
+            self.assertEqual(tags["sound_field_scene"]["audio_events"], ["speech"])
+            self.assertFalse(tags["sound_field_scene"]["music"])
+            self.assertEqual(tags["sound_field_scene"]["sound"], ["Noise"])
 
             artifacts = list((artifact_dir / "rir").glob("*.rir.json.gz"))
             self.assertEqual(len(artifacts), 1)
@@ -633,6 +796,68 @@ class AcousticToolsTest(unittest.TestCase):
                 artifact = json.load(source)
             self.assertEqual(artifact["sample_rate_hz"], 16000)
             self.assertEqual(len(artifact["samples"]), len(rir_samples))
+
+    def test_signal_pipeline_isolates_music_and_sound_failures(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "tone.wav"
+            write_test_wav(path, sample_rate=16000, channels=1, duration_sec=1.0)
+            common = {
+                "firered_vad_config": FireRedVadConfig(
+                    model_dir=str(Path(tmpdir) / "missing_vad"),
+                    subprocess_python="",
+                ),
+                "brouhaha_config": BrouhahaConfig(
+                    model_path=str(Path(tmpdir) / "missing_brouhaha.ckpt"),
+                    repo_dir=str(Path(tmpdir) / "missing_brouhaha"),
+                    subprocess_python="",
+                ),
+                "recrir_config": RecRirConfig(
+                    repo_dir=str(Path(tmpdir) / "missing_recrir"),
+                    config_path=str(Path(tmpdir) / "missing.toml"),
+                    checkpoint_path=str(Path(tmpdir) / "missing.tar"),
+                    subprocess_python="",
+                ),
+                "dnsmos_config": DnsmosConfig(subprocess_python=""),
+                "firered_aed_config": FireRedAedConfig(subprocess_python=""),
+                "panns_config": PannsBackgroundConfig(subprocess_python=""),
+            }
+            fire_output = {
+                "event2timestamps": {
+                    "speech": [],
+                    "singing": [],
+                    "music": [[0.1, 0.9]],
+                },
+                "event2ratio": {"speech": 0.0, "singing": 0.0, "music": 0.8},
+            }
+
+            panns_failure = tag_signal_record(
+                make_record(str(path)),
+                tmpdir,
+                firered_aed_client=FakeFireRedAedClient(fire_output),
+                panns_client=FakePannsBackgroundClient(
+                    make_panns_output(0.9, "/m/09x0r", "Speech")
+                ),
+                **common
+            )
+            fire_failure = tag_signal_record(
+                make_record(str(path)),
+                tmpdir,
+                firered_aed_client=FakeFireRedAedClient({}),
+                panns_client=FakePannsBackgroundClient(
+                    make_panns_output(0.8, "/m/096m7z", "Noise")
+                ),
+                **common
+            )
+
+            self.assertTrue(panns_failure["sound_field_scene"]["music"])
+            self.assertEqual(
+                panns_failure["sound_field_scene"]["audio_events"],
+                ["music"],
+            )
+            self.assertIsNone(panns_failure["sound_field_scene"]["sound"])
+            self.assertIsNone(fire_failure["sound_field_scene"]["music"])
+            self.assertIsNone(fire_failure["sound_field_scene"]["audio_events"])
+            self.assertEqual(fire_failure["sound_field_scene"]["sound"], ["Noise"])
 
     def test_c50_comparison_reports_brouhaha_and_recrir_values(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -709,6 +934,14 @@ class FakeFireRedAedClient:
         return self.output
 
 
+class FakePannsBackgroundClient:
+    def __init__(self, output):
+        self.output = output
+
+    def estimate(self, audio_path, context=None):
+        return self.output
+
+
 class FakeBrouhahaClient:
     def __init__(self, output):
         self.output = output
@@ -731,6 +964,21 @@ class FakeRecRirClient:
 
     def estimate_rir(self, audio_path, context=None):
         return self.output
+
+
+def make_panns_output(score, mid, display_name):
+    event = {
+        "index": 1,
+        "mid": mid,
+        "display_name": display_name,
+        "score": score,
+    }
+    return {
+        "chunk_count": 1,
+        "max_background_score": score,
+        "winning_event": dict(event),
+        "top_background_events": [dict(event)],
+    }
 
 
 def write_test_wav(
