@@ -61,7 +61,8 @@ manifest 每行是一个封闭的 raw-only JSON 对象。例如：
 
 ## 3. 当前可打标签
 
-当前 signal pipeline 实现了 16 个公开字段。
+当前 signal pipeline 实现了 24 个公开字段。`sound_field_scene.far_field`
+和 `language_content.topic` 仍是预留字段，暂时输出 `null`。
 
 ### 3.1 基础声学标签
 
@@ -102,10 +103,37 @@ PANNs 的默认阈值是 `0.30`。音频被切成互不重叠的 10 秒分块，
 `sound_field_scene.c50` 是从 Rec-RIR 输出计算的物理指标。两者来源不同，
 不能互相覆盖或当作同一个字段使用。
 
+### 3.3 说话人标签
+
+| Tag | 类型 | 打标方法 | 含义 |
+| --- | --- | --- | --- |
+| `speaker.multi_speaker` | boolean | MOSS diarize 或多通道 channel activity，再汇总 utterance speaker metrics | 样本内是否包含两个或更多不同说话人。 |
+| `speaker.speaker_change` | boolean | speaker timeline 内是否出现说话人切换点 | 样本内是否发生说话人切换。 |
+| `speaker.speaker_overlap` | boolean | speaker timeline 内是否存在重叠发言区间 | 样本内是否有多个说话人同时发言。 |
+
+MOSS diarize 默认不开启；需要通过 `--moss-diarize-enable` 和 endpoint/model
+配置接入。多通道 separated headset 输入可使用 channel activity fallback。
+完整 speaker metadata 只作为内部 artifact 保存，不进入公开 tags-only 输出。
+
+### 3.4 确定性语言内容标签
+
+这些标签只读取 `sample.text.transcript`，不需要音频文件。
+
+| Tag | 类型 | 打标方法 | 含义 |
+| --- | --- | --- | --- |
+| `language_content.language` | string | Unicode script heuristic | 基于主要字符脚本的粗粒度语言识别，当前映射 `en`、`zh`、`ru`、`ar`、`unknown`。 |
+| `language_content.word_count` | integer | simple multilingual tokenizer | transcript 中的词数。 |
+| `language_content.punctuation` | object | Unicode punctuation counter | `punctuation_count` 和 `has_terminal_punctuation`。 |
+| `language_content.repetition` | object | consecutive token ngram rule | `has_repetition` 和 `repetition_count`。 |
+| `language_content.filler` | integer | filler lexicon rule | filler token 数量。 |
+
+`language_content.topic` 和上下文增强暂不接入 root signal pipeline。
+
 ## 4. 模型输入预处理
 
 Pipeline 保留原音频文件，不会先生成一个供所有模型共享的转换版本。每个
-模型适配器根据自身输入要求单独降混和重采样。
+模型适配器根据自身输入要求单独降混和重采样。确定性语言内容标签只读取
+transcript，不读取音频。
 
 | 模块 | 实际送入模型的格式 | 处理方式 |
 | --- | --- | --- |
@@ -115,6 +143,7 @@ Pipeline 保留原音频文件，不会先生成一个供所有模型共享的�
 | DNSMOS | 16 kHz、单通道 | 多通道取均值，使用 librosa 重采样。 |
 | PANNs Cnn14 | 32 kHz、单通道 | `librosa.load(..., sr=32000, mono=True)`。 |
 | Rec-RIR | 16 kHz、单通道 | torchaudio 对多通道取均值并重采样，临时 WAV 推理后删除。 |
+| 确定性语言内容 | 原始 transcript | 不做音频预处理；直接对输入文本 tokenize 和统计。 |
 
 因此 8 kHz 或双通道音频可以正常进入模型。需要注意，8 kHz 上采样只能
 满足模型输入格式，无法恢复原音频 4 kHz 以上已经不存在的频率信息；多通道
@@ -164,11 +193,17 @@ warning 或推理证据。
   },
   "language_content": {
     "topic": null,
-    "language": null,
-    "word_count": null,
-    "punctuation": null,
-    "repetition": null,
-    "filler": null
+    "language": "en",
+    "word_count": 12,
+    "punctuation": {
+      "punctuation_count": 2,
+      "has_terminal_punctuation": true
+    },
+    "repetition": {
+      "has_repetition": false,
+      "repetition_count": 0
+    },
+    "filler": 1
   }
 }
 ```
@@ -189,21 +224,13 @@ warning 或推理证据。
 
 ## 6. 当前预留字段
 
-以下 10 个字段属于公开 schema，但尚未接入当前 signal pipeline 的已注册
-工具，因此目前输出 `null`：
+以下字段属于公开 schema，但尚未接入当前 signal pipeline 的已注册工具，
+因此目前输出 `null`：
 
 | Tag | 计划含义 |
 | --- | --- |
 | `sound_field_scene.far_field` | 是否为远场拾音或远距离声源。 |
-| `speaker.multi_speaker` | 是否包含两个或更多不同说话人。 |
-| `speaker.speaker_change` | 样本内是否发生说话人切换。 |
-| `speaker.speaker_overlap` | 是否存在多个说话人同时发言。 |
 | `language_content.topic` | 转写文本的主题或层级主题类别。 |
-| `language_content.language` | 转写文本的语言。 |
-| `language_content.word_count` | 转写文本的词数统计。 |
-| `language_content.punctuation` | 标点数量和终止标点信息。 |
-| `language_content.repetition` | 连续词语或短语重复。 |
-| `language_content.filler` | `uh`、`um`、`ah` 等填充词统计。 |
 
 ## 7. 内部产物
 

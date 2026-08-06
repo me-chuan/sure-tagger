@@ -221,6 +221,32 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertTrue(tags["sound_field_scene"]["music"])
             self.assertEqual(tags["sound_field_scene"]["sound"], ["Traffic noise"])
 
+    def test_signal_tag_record_populates_deterministic_language_content_without_audio(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            record = make_record("missing.wav")
+            record["sample"]["text"]["transcript"] = "Um hello hello."
+
+            tags = tag_signal_record(record, tmpdir)
+
+            self.assertIsNone(tags["language_content"]["topic"])
+            self.assertEqual(tags["language_content"]["language"], "en")
+            self.assertEqual(tags["language_content"]["word_count"], 3)
+            self.assertEqual(
+                tags["language_content"]["punctuation"],
+                {
+                    "punctuation_count": 1,
+                    "has_terminal_punctuation": True,
+                },
+            )
+            self.assertEqual(
+                tags["language_content"]["repetition"],
+                {
+                    "has_repetition": True,
+                    "repetition_count": 1,
+                },
+            )
+            self.assertEqual(tags["language_content"]["filler"], 1)
+
     def test_fire_red_speech_segments_convert_to_silence_segments(self):
         segments = speech_segments_to_silence_segments(
             [[0.44, 1.82]],

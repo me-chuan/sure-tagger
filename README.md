@@ -80,8 +80,9 @@ Model-backed tools require local model directories/checkpoints configured in
 See [the tag and method documentation](docs/tags-and-methods.md) for the public
 fields, preprocessing, and JSON examples. Tool-specific setup details are kept
 in `tagger/tools/basic_acoustic/README.md`,
-`tagger/tools/sound_field_scene/README.md`, and
-`tagger/tools/speaker/README.md`.
+`tagger/tools/sound_field_scene/README.md`,
+`tagger/tools/speaker/README.md`, and
+`tagger/tools/language_content/README.md`.
 
 ## Speaker Pipeline
 

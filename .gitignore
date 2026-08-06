@@ -37,10 +37,13 @@ api.txt
 
 # External datasets and generated outputs
 /data
+/AMI
+/EN2001a.jsonl
 /bridge/sure-tagger/AMI
 /bridge/sure-tagger/outputs/
 /phase1_asr_samples/outputs/
-/ami_en2001a_utterances/audio/
+/ami_en2001a_utterances/
+/phase2_asr_sample/
 /ami_en2001a_utterances/outputs/
 /outputs/
 

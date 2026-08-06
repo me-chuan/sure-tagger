@@ -56,6 +56,7 @@ from tagger.tools.speaker.registry import (
     MOSS_DIARIZE_TOOL,
     SPEAKER_METRICS_TOOL,
 )
+from tagger.tools.language_content.registry import DETERMINISTIC_LANGUAGE_CONTENT_TOOL
 
 
 BASIC_ACOUSTIC_FIELDS = {
@@ -233,6 +234,8 @@ def _tag_record_internal(
     internal_results = []  # type: List[Dict[str, Any]]
     warnings = []  # type: List[Dict[str, Any]]
 
+    _run_language_content_tools(sample, tags, internal_results, warnings, sample_id)
+
     if audio_path is None:
         warnings.append(
             {
@@ -347,6 +350,7 @@ def _tag_record_internal(
     warnings.extend(audit_basic_acoustic(tags["basic_acoustic"]))
     warnings.extend(audit_sound_field_scene(tags["sound_field_scene"]))
     warnings.extend(audit_speaker(tags["speaker"]))
+    warnings.extend(audit_language_content(tags["language_content"]))
 
     return {
         "tags": tags,
@@ -481,6 +485,25 @@ def _run_silence_tools(
         )
         tags["basic_acoustic"]["silence_segments"] = None
         tags["basic_acoustic"]["silence_ratio"] = None
+
+
+def _run_language_content_tools(sample, tags, internal_results, warnings, sample_id):
+    # type: (Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], str) -> None
+    transcript = sample.get("text", {}).get("transcript", "")
+    try:
+        for result in DETERMINISTIC_LANGUAGE_CONTENT_TOOL["run"](transcript):
+            apply_result(tags, internal_results, result)
+    except Exception as exc:  # noqa: BLE001 - tool failures become internal warnings.
+        warnings.append(
+            {
+                "type": "language_content_tool_error",
+                "message": str(exc),
+                "sample_id": sample_id,
+                "tool_name": DETERMINISTIC_LANGUAGE_CONTENT_TOOL["tool_name"],
+            }
+        )
+        for field in ("language", "word_count", "punctuation", "repetition", "filler"):
+            tags["language_content"][field] = None
 
 
 def _run_speaker_tools(
@@ -1511,6 +1534,76 @@ def audit_speaker(speaker):
             warnings.append({"type": "invalid_speaker_value", "field": field})
 
     return warnings
+
+
+def audit_language_content(language_content):
+    # type: (Dict[str, Any]) -> List[Dict[str, Any]]
+    warnings = []  # type: List[Dict[str, Any]]
+
+    topic = language_content.get("topic")
+    if topic is not None and not isinstance(topic, str):
+        language_content["topic"] = None
+        warnings.append({"type": "invalid_language_content_value", "field": "topic"})
+
+    language = language_content.get("language")
+    if language is not None and (not isinstance(language, str) or not language):
+        language_content["language"] = None
+        warnings.append(
+            {"type": "invalid_language_content_value", "field": "language"}
+        )
+
+    if not _is_non_negative_int(language_content.get("word_count")):
+        if language_content.get("word_count") is not None:
+            language_content["word_count"] = None
+            warnings.append(
+                {"type": "invalid_language_content_value", "field": "word_count"}
+            )
+
+    punctuation = language_content.get("punctuation")
+    if punctuation is not None and not _is_valid_punctuation_value(punctuation):
+        language_content["punctuation"] = None
+        warnings.append(
+            {"type": "invalid_language_content_value", "field": "punctuation"}
+        )
+
+    repetition = language_content.get("repetition")
+    if repetition is not None and not _is_valid_repetition_value(repetition):
+        language_content["repetition"] = None
+        warnings.append(
+            {"type": "invalid_language_content_value", "field": "repetition"}
+        )
+
+    filler = language_content.get("filler")
+    if filler is not None and not _is_non_negative_int(filler):
+        language_content["filler"] = None
+        warnings.append({"type": "invalid_language_content_value", "field": "filler"})
+
+    return warnings
+
+
+def _is_non_negative_int(value):
+    return not isinstance(value, bool) and isinstance(value, int) and value >= 0
+
+
+def _is_valid_punctuation_value(value):
+    if not isinstance(value, dict):
+        return False
+    if set(value.keys()) != set(["punctuation_count", "has_terminal_punctuation"]):
+        return False
+    return _is_non_negative_int(value["punctuation_count"]) and isinstance(
+        value["has_terminal_punctuation"],
+        bool,
+    )
+
+
+def _is_valid_repetition_value(value):
+    if not isinstance(value, dict):
+        return False
+    if set(value.keys()) != set(["has_repetition", "repetition_count"]):
+        return False
+    return isinstance(value["has_repetition"], bool) and _is_non_negative_int(
+        value["repetition_count"]
+    )
 
 
 def _is_valid_silence_segments(segments, duration_sec):
