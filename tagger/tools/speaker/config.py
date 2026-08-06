@@ -12,14 +12,17 @@ class SpeakerLayerConfig:
         self,
         enable_moss=False,
         enable_channel_activity=True,
+        force_channel_activity=False,
         prefer_channel_activity=False,
-        run_moss_for_channel_qa=False,
+        run_moss_for_channel_qa=True,
         moss_config=None,
         channel_activity_config=None,
     ):
         self.enable_moss = bool(enable_moss)
         self.enable_channel_activity = bool(enable_channel_activity)
-        self.prefer_channel_activity = bool(prefer_channel_activity)
+        self.force_channel_activity = bool(force_channel_activity or prefer_channel_activity)
+        # Kept as an attribute for callers that still inspect the legacy option.
+        self.prefer_channel_activity = self.force_channel_activity
         self.run_moss_for_channel_qa = bool(run_moss_for_channel_qa)
         self.moss_config = moss_config or MossDiarizeConfig()
         self.channel_activity_config = channel_activity_config or ChannelActivityConfig()
@@ -52,7 +55,7 @@ def default_speaker_layer_config(
     )
     channel_config = ChannelActivityConfig(
         window_sec=getattr(local_config, "SPEAKER_CHANNEL_WINDOW_SEC", 0.05),
-        energy_threshold=getattr(local_config, "SPEAKER_CHANNEL_ENERGY_THRESHOLD", 500.0),
+        energy_threshold=getattr(local_config, "SPEAKER_CHANNEL_ENERGY_THRESHOLD", 200.0),
         leakage_relative_db=getattr(local_config, "SPEAKER_CHANNEL_LEAKAGE_RELATIVE_DB", -18.0),
         min_segment_duration_sec=getattr(local_config, "SPEAKER_MIN_SEGMENT_DURATION_SEC", 0.10),
         merge_gap_sec=getattr(local_config, "SPEAKER_MERGE_SAME_SPEAKER_GAP_SEC", 0.30),
@@ -60,8 +63,9 @@ def default_speaker_layer_config(
     return SpeakerLayerConfig(
         enable_moss=enable_moss,
         enable_channel_activity=True,
+        force_channel_activity=False,
         prefer_channel_activity=False,
-        run_moss_for_channel_qa=False,
+        run_moss_for_channel_qa=True,
         moss_config=moss_config,
         channel_activity_config=channel_config,
     )

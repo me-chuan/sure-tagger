@@ -16,7 +16,7 @@ from tagger.tools.speaker.metrics import normalize_segments
 
 
 TOOL_NAME = "moss_diarizer"
-TOOL_VERSION = "moss_diarizer_v0.1.0"
+TOOL_VERSION = "moss_diarizer_v0.2.0"
 
 
 class MossDiarizeError(RuntimeError):
@@ -102,6 +102,62 @@ def run_merged_channels(audio_path, duration_sec=None, context=None, config=None
             "input_channel_count": mixed["channel_count"],
             "mixdown_method": mixed["method"],
             "segment_count": len(value.get("segments", [])),
+            "model": config.model,
+        },
+    )
+
+
+def run_channel_purity_check(audio_path, duration_sec=None, context=None, config=None, client=None, **_kwargs):
+    # type: (Union[str, Path], Optional[float], Optional[Dict[str, Any]], Optional[MossDiarizeConfig], Any, Any) -> ToolResult
+    config = config or MossDiarizeConfig()
+    path = Path(audio_path)
+    channel_results = []
+    with tempfile.TemporaryDirectory(prefix="sure_tagger_moss_channel_qa_") as tmpdir:
+        split = split_multichannel_wav(path, Path(tmpdir))
+        for channel_index, channel_path in enumerate(split["paths"]):
+            channel_context = dict(context or {})
+            channel_context.update({
+                "speaker_route_phase": "channel_purity_check",
+                "source_channel_id": "ch%s" % channel_index,
+            })
+            result = run(
+                channel_path,
+                duration_sec=duration_sec,
+                context=channel_context,
+                config=config,
+                client=client,
+            )
+            speaker_ids = sorted(set(
+                str(item["speaker_id"])
+                for item in result.value.get("segments", [])
+                if item.get("speaker_id") is not None
+            ))
+            channel_results.append({
+                "channel_id": "ch%s" % channel_index,
+                "speaker_count": len(speaker_ids),
+                "speaker_ids": speaker_ids,
+            })
+    all_single_speaker = bool(channel_results) and all(
+        item["speaker_count"] == 1 for item in channel_results
+    )
+    value = {
+        "metadata_version": "moss_channel_purity_v0.1",
+        "all_channels_single_speaker": all_single_speaker,
+        "channels": channel_results,
+    }
+    return ToolResult(
+        tag_path="speaker.channel_purity",
+        value=value,
+        tool_name=TOOL_NAME,
+        method="moss_per_channel_speaker_purity",
+        status="estimated",
+        confidence=0.85,
+        tool_type="model",
+        tool_version=TOOL_VERSION,
+        evidence={
+            "input_channel_count": split["channel_count"],
+            "channel_split_method": split["method"],
+            "all_channels_single_speaker": all_single_speaker,
             "model": config.model,
         },
     )
@@ -311,6 +367,105 @@ def mixdown_multichannel_wav(audio_path, output_dir):
         return _mixdown_multichannel_wav_python(path, output_dir)
     except wave.Error:
         return _mixdown_multichannel_wav_ffmpeg(path, output_dir)
+
+
+def split_multichannel_wav(audio_path, output_dir):
+    # type: (Union[str, Path], Path) -> Dict[str, Any]
+    path = Path(audio_path)
+    try:
+        return _split_multichannel_wav_python(path, output_dir)
+    except wave.Error:
+        return _split_multichannel_wav_ffmpeg(path, output_dir)
+
+
+def _split_multichannel_wav_python(path, output_dir):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    writers = []
+    output_paths = []
+    with wave.open(str(path), "rb") as source:
+        channels = source.getnchannels()
+        if channels < 2:
+            raise MossDiarizeError("MOSS channel purity check requires at least two channels")
+        sample_width = source.getsampwidth()
+        sample_rate = source.getframerate()
+        try:
+            for channel_index in range(channels):
+                output_path = output_dir / (
+                    "%s.channel_%03d.wav" % (path.stem, channel_index)
+                )
+                writer = wave.open(str(output_path), "wb")
+                writer.setnchannels(1)
+                writer.setsampwidth(sample_width)
+                writer.setframerate(sample_rate)
+                writers.append(writer)
+                output_paths.append(output_path)
+            frame_size = channels * sample_width
+            while True:
+                raw = source.readframes(16000)
+                if not raw:
+                    break
+                frame_count = len(raw) // frame_size
+                for channel_index, writer in enumerate(writers):
+                    mono = bytearray(frame_count * sample_width)
+                    for frame_index in range(frame_count):
+                        source_offset = frame_index * frame_size + channel_index * sample_width
+                        target_offset = frame_index * sample_width
+                        mono[target_offset:target_offset + sample_width] = raw[
+                            source_offset:source_offset + sample_width
+                        ]
+                    writer.writeframes(mono)
+        finally:
+            for writer in writers:
+                writer.close()
+    return {
+        "paths": output_paths,
+        "channel_count": channels,
+        "sample_rate_hz": sample_rate,
+        "method": "python_wave_channel_split",
+    }
+
+
+def _split_multichannel_wav_ffmpeg(path, output_dir):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    info = _ffprobe_audio_info(path)
+    channels = int(info["channels"])
+    sample_rate = int(info["sample_rate"])
+    if channels < 2:
+        raise MossDiarizeError("MOSS channel purity check requires at least two channels")
+    output_paths = []
+    for channel_index in range(channels):
+        output_path = output_dir / (
+            "%s.channel_%03d.wav" % (path.stem, channel_index)
+        )
+        command = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(path),
+            "-map",
+            "0:a:0",
+            "-af",
+            "pan=mono|c0=c%s" % channel_index,
+            "-ar",
+            str(sample_rate),
+            str(output_path),
+        ]
+        try:
+            subprocess.check_call(command)
+        except OSError as exc:
+            raise MossDiarizeError("ffmpeg is required for MOSS channel purity check") from exc
+        except subprocess.CalledProcessError as exc:
+            raise MossDiarizeError("ffmpeg channel split failed for %s" % path) from exc
+        output_paths.append(output_path)
+    return {
+        "paths": output_paths,
+        "channel_count": channels,
+        "sample_rate_hz": sample_rate,
+        "method": "ffmpeg_channel_split",
+    }
 
 
 def _mixdown_multichannel_wav_python(path, output_dir):

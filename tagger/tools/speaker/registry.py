@@ -9,6 +9,7 @@ MOSS_DIARIZE_TOOL = {
     "tag_path": "speaker.diarization_timeline",
     "tool_name": moss_diarizer.TOOL_NAME,
     "run": moss_diarizer.run,
+    "run_channel_purity_check": moss_diarizer.run_channel_purity_check,
     "run_merged_channels": moss_diarizer.run_merged_channels,
 }
 

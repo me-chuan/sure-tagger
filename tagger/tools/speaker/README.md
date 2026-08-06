@@ -29,7 +29,7 @@ python3 scripts/run_signal.py \
 
 ### 多通道 / separated headset
 
-多通道 / separated headset 在启用 MOSS 时默认走 merged-headset MOSS：pipeline 会先把多通道 headset 音频混成临时 mono WAV，再对混合音频跑一次 MOSS diarize。这样让 MOSS 在同一个声场里做 speaker clustering，避免逐通道串音被重复识别成多路 speaker。
+多通道 / separated headset 只有在确认每个通道恰好对应一个说话人时，才使用 channel activity。默认情况下，pipeline 会把每个通道拆成临时 mono WAV，分别运行 MOSS 检查 speaker 数：全部通道都恰好检出一个 speaker 时，使用 per-channel energy VAD；任一通道检出多个 speaker、没有有效 speaker 或检查失败时，将原始多通道音频混成临时 mono WAV，再执行一次 MOSS diarize。这样既能在通道纯净时保留 headset 的 speaker 对应关系，也能在通道包含多说话人或结果不确定时让 MOSS 在同一声场中统一 clustering。
 
 AMI 原始 separated headset 如果是多个文件（例如 `ES2005a.Headset-0.wav` 到 `ES2005a.Headset-3.wav`），生产输入应先把这些 headset 合成同一段多通道 WAV 或对应的 utterance-level 多通道切片，再写入 `sample.audio.path`。不要把单个 `Headset-N` 文件作为生产 speaker route 输入；单通道 headset 只适合作诊断。
 
@@ -43,7 +43,18 @@ python3 scripts/run_signal.py \
   --moss-diarize-model /hpc_stor03/sjtu_home/huifei.wang/models/moss_td_model
 ```
 
-如果没有配置 MOSS，或 merged-headset MOSS 失败，pipeline 才回退到 channel activity baseline。`--speaker-prefer-channel-activity` 可以显式先跑旧的 energy-based channel activity route。
+如果数据集说明明确保证一个通道只对应一个说话人，可以跳过 MOSS purity check，显式强制使用 channel activity：
+
+```bash
+python3 scripts/run_signal.py \
+  --manifest path/to/headset_manifest.jsonl \
+  --output outputs/headset_tags.jsonl \
+  --speaker-single-speaker-per-channel
+```
+
+`--speaker-force-channel-activity` 是同义参数；旧的 `--speaker-prefer-channel-activity` 作为兼容别名保留。没有配置 MOSS 且没有显式声明单通道单说话人时，pipeline 不会使用 channel activity，speaker tags 返回 null。`--speaker-prefer-moss` 可跳过 purity check，直接走 merged-headset MOSS。
+
+Channel activity 默认使用 50 ms RMS 窗口，绝对能量阈值为 200，相对泄漏阈值为 -18 dB。由于该路线只在通道 speaker 对应关系已确认时使用，绝对能量阈值由 500 下调为 200，以保留较弱的近讲语音。
 
 如果路径或原生 metadata 标明是 `Mix-Headset`，即使音频是 stereo，也不会把左右声道当作 separated headset。
 
@@ -68,13 +79,15 @@ pipeline 根据音频和原生 metadata 选择 route：
 | input | route | tool |
 | --- | --- | --- |
 | `mix_headset` / mono mixed recording | MOSS diarize | `moss_diarizer.py` |
-| `separated_headset_channels` / multi-channel WAV with MOSS enabled | merged-headset MOSS diarize | `moss_diarizer.py` |
-| `separated_headset_channels` / multi-channel WAV without MOSS | channel activity fallback | `channel_activity.py` |
+| `separated_headset_channels` / explicit single-speaker-per-channel assertion | per-channel energy VAD | `channel_activity.py` |
+| `separated_headset_channels` / MOSS confirms every channel has one speaker | per-channel energy VAD | `moss_diarizer.py` + `channel_activity.py` |
+| `separated_headset_channels` / any channel is multi-speaker or unconfirmed | merged-headset MOSS diarize | `moss_diarizer.py` |
+| `separated_headset_channels` / no MOSS and no explicit assertion | null speaker tags | pipeline fallback |
 | `separated_headset_files` | prepare multi-channel WAV before pipeline | preprocessing |
 | unknown mono/mixed input with MOSS enabled | MOSS diarize | `moss_diarizer.py` |
 | no usable route or tool failure | null speaker tags | pipeline fallback |
 
-`--speaker-prefer-moss` 目前保留为兼容参数；启用 MOSS 时 separated headset 默认已经优先使用 merged-headset MOSS。
+MOSS channel purity check 的结果只进入内部 evidence，不进入公开 tags-only output。公开 speaker schema 保持不变。
 
 ### 3. Route 输出归一
 

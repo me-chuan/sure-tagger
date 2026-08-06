@@ -11,6 +11,7 @@ from tagger.input_schema import InputSchemaError, validate_input_record
 from tagger.pipelines.signal import (
     audit_speaker,
     audit_sound_field_scene,
+    build_arg_parser,
     resolve_audio_path,
     run_manifest as run_signal_manifest,
     tag_record as tag_signal_record,
@@ -52,7 +53,7 @@ from tagger.tools.speaker.metrics import (
     build_metadata_from_timeline,
     public_results_from_metadata,
 )
-from tagger.tools.speaker.moss_diarizer import parse_moss_text
+from tagger.tools.speaker.moss_diarizer import parse_moss_text, run_channel_purity_check
 
 
 class AcousticToolsTest(unittest.TestCase):
@@ -583,6 +584,36 @@ class AcousticToolsTest(unittest.TestCase):
                 [{"start_sec": 0.8, "end_sec": 2.0}],
             )
 
+    def test_moss_channel_purity_check_splits_and_checks_each_channel(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "headset.wav"
+            write_test_wav(path, sample_rate=8000, channels=2, duration_sec=2.0)
+            client = FakeMossClient([
+                {
+                    "segments": [
+                        {"start_sec": 0.0, "end_sec": 2.0, "speaker_id": "S01"}
+                    ]
+                },
+                {
+                    "segments": [
+                        {"start_sec": 0.0, "end_sec": 2.0, "speaker_id": "S07"}
+                    ]
+                },
+            ])
+
+            result = run_channel_purity_check(path, duration_sec=2.0, client=client)
+
+            self.assertTrue(result.value["all_channels_single_speaker"])
+            self.assertEqual(
+                [item["speaker_count"] for item in result.value["channels"]],
+                [1, 1],
+            )
+            self.assertEqual(client.input_channel_counts, [1, 1])
+            self.assertEqual(
+                [item.get("source_channel_id") for item in client.contexts],
+                ["ch0", "ch1"],
+            )
+
     def test_signal_pipeline_uses_injected_moss_client_for_speaker_tags(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "mono.wav"
@@ -640,6 +671,14 @@ class AcousticToolsTest(unittest.TestCase):
             record = make_record(str(path))
             record["sample"]["native_metadata"]["microphone_type"] = "Headset"
 
+            moss_client = FakeMossClient(
+                {
+                    "segments": [
+                        {"start_sec": 0.0, "end_sec": 1.2, "speaker_id": "S01"},
+                        {"start_sec": 0.8, "end_sec": 2.0, "speaker_id": "S02"},
+                    ]
+                }
+            )
             tags = tag_signal_record(
                 record,
                 tmpdir,
@@ -659,14 +698,7 @@ class AcousticToolsTest(unittest.TestCase):
                     subprocess_python="",
                 ),
                 speaker_config=default_speaker_layer_config(enable_moss=True),
-                moss_client=FakeMossClient(
-                    {
-                        "segments": [
-                            {"start_sec": 0.0, "end_sec": 1.2, "speaker_id": "S01"},
-                            {"start_sec": 0.8, "end_sec": 2.0, "speaker_id": "S02"},
-                        ]
-                    }
-                ),
+                moss_client=moss_client,
                 artifact_dir=artifact_dir,
             )
 
@@ -686,6 +718,148 @@ class AcousticToolsTest(unittest.TestCase):
                 ["spk_001", "spk_002"],
             )
             self.assertNotIn("source_channel_id", artifact["segments"][0])
+            self.assertEqual(moss_client.input_channel_counts, [1, 1, 1])
+            self.assertIn("merged_mono", moss_client.audio_names[-1])
+
+    def test_signal_pipeline_uses_channel_activity_after_moss_purity_check(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "headset.wav"
+            write_test_wav(path, sample_rate=8000, channels=2, duration_sec=2.0)
+            artifact_dir = Path(tmpdir) / "artifacts"
+            record = make_record(str(path))
+            record["sample"]["native_metadata"]["microphone_type"] = "Headset"
+            moss_client = FakeMossClient([
+                {
+                    "segments": [
+                        {"start_sec": 0.0, "end_sec": 2.0, "speaker_id": "S01"}
+                    ]
+                },
+                {
+                    "segments": [
+                        {"start_sec": 0.0, "end_sec": 2.0, "speaker_id": "S01"}
+                    ]
+                },
+            ])
+            channel_client = FakeChannelActivityClient(
+                {
+                    "metadata_version": "channel_activity_v0.1",
+                    "duration_sec": 2.0,
+                    "channels": [
+                        {
+                            "channel_id": "ch0",
+                            "speaker_id": "spk_A",
+                            "speech_segments": [{"start_sec": 0.0, "end_sec": 1.2}],
+                        },
+                        {
+                            "channel_id": "ch1",
+                            "speaker_id": "spk_B",
+                            "speech_segments": [{"start_sec": 0.8, "end_sec": 2.0}],
+                        },
+                    ],
+                }
+            )
+
+            tags = tag_signal_record(
+                record,
+                tmpdir,
+                speaker_config=default_speaker_layer_config(enable_moss=True),
+                moss_client=moss_client,
+                channel_activity_client=channel_client,
+                artifact_dir=artifact_dir,
+            )
+
+            self.assertTrue(tags["speaker"]["multi_speaker"])
+            self.assertEqual(moss_client.input_channel_counts, [1, 1])
+            self.assertEqual(channel_client.call_count, 1)
+            artifacts = list((artifact_dir / "speaker").glob("*.channel_activity.json.gz"))
+            self.assertEqual(len(artifacts), 1)
+
+    def test_force_channel_activity_skips_moss_purity_check(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "headset.wav"
+            write_test_wav(path, sample_rate=8000, channels=2, duration_sec=2.0)
+            config = default_speaker_layer_config(enable_moss=True)
+            config.force_channel_activity = True
+            moss_client = FakeMossClient({"segments": []})
+            channel_client = FakeChannelActivityClient(
+                {
+                    "metadata_version": "channel_activity_v0.1",
+                    "duration_sec": 2.0,
+                    "channels": [
+                        {
+                            "channel_id": "ch0",
+                            "speaker_id": "spk_A",
+                            "speech_segments": [{"start_sec": 0.0, "end_sec": 1.2}],
+                        },
+                        {
+                            "channel_id": "ch1",
+                            "speaker_id": "spk_B",
+                            "speech_segments": [{"start_sec": 0.8, "end_sec": 2.0}],
+                        },
+                    ],
+                }
+            )
+
+            tags = tag_signal_record(
+                make_record(str(path)),
+                tmpdir,
+                speaker_config=config,
+                moss_client=moss_client,
+                channel_activity_client=channel_client,
+            )
+
+            self.assertTrue(tags["speaker"]["multi_speaker"])
+            self.assertEqual(moss_client.input_channel_counts, [])
+            self.assertEqual(channel_client.call_count, 1)
+
+    def test_channel_activity_requires_purity_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "headset.wav"
+            write_test_wav(path, sample_rate=8000, channels=2, duration_sec=2.0)
+            channel_client = FakeChannelActivityClient(
+                {
+                    "metadata_version": "channel_activity_v0.1",
+                    "duration_sec": 2.0,
+                    "channels": [
+                        {
+                            "channel_id": "ch0",
+                            "speaker_id": "spk_A",
+                            "speech_segments": [{"start_sec": 0.0, "end_sec": 2.0}],
+                        },
+                        {
+                            "channel_id": "ch1",
+                            "speaker_id": "spk_B",
+                            "speech_segments": [{"start_sec": 0.0, "end_sec": 2.0}],
+                        },
+                    ],
+                }
+            )
+
+            tags = tag_signal_record(
+                make_record(str(path)),
+                tmpdir,
+                speaker_config=default_speaker_layer_config(enable_moss=False),
+                channel_activity_client=channel_client,
+            )
+
+            self.assertIsNone(tags["speaker"]["multi_speaker"])
+            self.assertIsNone(tags["speaker"]["speaker_change"])
+            self.assertIsNone(tags["speaker"]["speaker_overlap"])
+            self.assertEqual(channel_client.call_count, 0)
+
+    def test_speaker_force_channel_activity_cli_aliases(self):
+        for option in (
+            "--speaker-force-channel-activity",
+            "--speaker-single-speaker-per-channel",
+            "--speaker-prefer-channel-activity",
+        ):
+            args = build_arg_parser().parse_args([option])
+            self.assertTrue(args.speaker_force_channel_activity)
+
+        self.assertEqual(
+            default_speaker_layer_config().channel_activity_config.energy_threshold,
+            200.0,
+        )
 
     def test_signal_manifest_passes_injected_channel_activity_client(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -714,7 +888,7 @@ class AcousticToolsTest(unittest.TestCase):
                     checkpoint_path=str(Path(tmpdir) / "missing_recrir.tar"),
                     subprocess_python="",
                 ),
-                speaker_config=default_speaker_layer_config(enable_moss=False),
+                speaker_config=_forced_channel_activity_config(),
                 channel_activity_client=FakeChannelActivityClient(
                     {
                         "metadata_version": "channel_activity_v0.1",
@@ -850,8 +1024,15 @@ class FakeMossClient:
         else:
             self.outputs = None
             self.output = output
+        self.audio_names = []
+        self.contexts = []
+        self.input_channel_counts = []
 
     def diarize(self, audio_path, context=None):
+        self.audio_names.append(Path(audio_path).name)
+        self.contexts.append(dict(context or {}))
+        with wave.open(str(audio_path), "rb") as source:
+            self.input_channel_counts.append(source.getnchannels())
         if self.outputs is not None:
             if not self.outputs:
                 return {"segments": []}
@@ -862,9 +1043,17 @@ class FakeMossClient:
 class FakeChannelActivityClient:
     def __init__(self, output):
         self.output = output
+        self.call_count = 0
 
     def detect_channel_activity(self, audio_path, context=None):
+        self.call_count += 1
         return self.output
+
+
+def _forced_channel_activity_config():
+    config = default_speaker_layer_config(enable_moss=False)
+    config.force_channel_activity = True
+    return config
 
 
 def write_test_wav(

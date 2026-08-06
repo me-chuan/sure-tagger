@@ -28,7 +28,7 @@ MOSS diarize 和 channel activity route 都会归一成同一种内部 metadata�
 | field | type | meaning |
 | --- | --- | --- |
 | `speaker_id` | `string` | 匿名 speaker ID，只在同一个 metadata/recording 内稳定，不表示真实身份。 |
-| `source_channel_id` | `string/null` | channel-activity fallback 中对应的原始 channel ID；MOSS mixed/merged-headset route 通常为 `null`。 |
+| `source_channel_id` | `string/null` | channel-activity route 中对应的原始 channel ID；MOSS mixed/merged-headset route 通常为 `null`。 |
 | `speech_duration_sec` | `number` | 该 speaker 在当前音频范围内的有效 speech 总时长。 |
 | `turn_count` | `int` | 合并短间隔后的该 speaker turn 数。 |
 
@@ -40,7 +40,7 @@ MOSS diarize 和 channel activity route 都会归一成同一种内部 metadata�
 | `start_sec` | `number` | segment 起始时间，单位秒，相对当前音频起点。 |
 | `end_sec` | `number` | segment 结束时间，单位秒，相对当前音频起点。 |
 | `speaker_id` | `string` | 该 segment 的匿名 speaker ID。 |
-| `source_channel_id` | `string/null` | channel-activity fallback 的来源 channel；无来源 channel 时为 `null` 或缺省。 |
+| `source_channel_id` | `string/null` | channel-activity route 的来源 channel；无来源 channel 时为 `null` 或缺省。 |
 | `text` | `string` | 可选内部转写文本，只用于对齐检查，不替换 raw input transcript。 |
 
 ## `overlap_segments[]`
@@ -184,7 +184,7 @@ MOSS diarize 和 channel activity route 都会归一成同一种内部 metadata�
 说明：
 
 - `speaker_id` 是匿名 ID，只在同一个 recording 内稳定，不表示真实身份。
-- `source_channel_id` 只用于 channel-activity fallback；merged-headset MOSS 不把 headset channel 当作 speaker ID 或展示字段。
+- `source_channel_id` 只用于已确认单通道单说话人的 channel-activity route；merged-headset MOSS 不把 headset channel 当作 speaker ID 或展示字段。
 - `text` 只用于内部对齐检查，不替换 raw manifest transcript。
 - `speakers`、`segments`、`overlap_segments`、`utterances`、`recording_summary` 都是内部 metadata，不进入公开 output。
 
