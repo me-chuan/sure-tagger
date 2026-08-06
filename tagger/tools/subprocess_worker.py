@@ -51,6 +51,8 @@ def dispatch(tool_name, request):
         return _run_dnsmos_estimate(request)
     if tool_name == "recrir_estimate":
         return _run_recrir_estimate(request)
+    if tool_name == "moss_diarize_estimate":
+        return _run_moss_diarize_estimate(request)
     raise ValueError("unknown subprocess tool: %s" % tool_name)
 
 
@@ -135,6 +137,22 @@ def _run_dnsmos_estimate(request):
     config = DnsmosConfig(**request["config"])
     client = _cached_client("dnsmos_estimate", request["config"], DnsmosClient, config)
     return {"output": client.estimate(request["audio_path"], context=None)}
+
+
+def _run_moss_diarize_estimate(request):
+    from tagger.tools.speaker.moss_diarizer import (
+        MossDiarizeClient,
+        MossDiarizeConfig,
+    )
+
+    config = MossDiarizeConfig(**request["config"])
+    client = _cached_client(
+        "moss_diarize_estimate",
+        request["config"],
+        MossDiarizeClient,
+        config,
+    )
+    return {"output": client.diarize(request["audio_path"], context=None)}
 
 
 def _cached_client(tool_name, config_record, client_class, config):

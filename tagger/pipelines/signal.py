@@ -553,99 +553,121 @@ def _run_speaker_tools(
     channel_error = None
     moss_available = config.enable_moss or moss_client is not None
 
-    if separated_channel_input and moss_available and not config.prefer_channel_activity:
-        try:
-            _run_moss_merged_headset_speaker_route(
-                audio_path,
-                tool_context,
-                tags,
-                internal_results,
-                warnings,
-                sample_id,
-                duration_sec,
-                config,
-                metrics_config,
-                recording_id,
-                input_kind,
-                target_units,
-                moss_client,
-                artifact_dir,
-                artifact_record_index,
-            )
-            return
-        except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
-            warnings.append(
-                {
-                    "type": "moss_merged_headset_diarize_error",
-                    "message": str(exc),
-                    "sample_id": sample_id,
-                    "audio_path": str(audio_path),
-                    "tool_name": MOSS_DIARIZE_TOOL["tool_name"],
-                }
-            )
+    if separated_channel_input:
+        channels_are_single_speaker = bool(
+            config.force_channel_activity or config.prefer_channel_activity
+        )
+        if (
+            not channels_are_single_speaker
+            and moss_available
+            and config.run_moss_for_channel_qa
+        ):
+            try:
+                purity_result = MOSS_DIARIZE_TOOL["run_channel_purity_check"](
+                    audio_path,
+                    duration_sec=duration_sec,
+                    context=tool_context,
+                    config=config.moss_config,
+                    client=moss_client,
+                )
+                internal_results.append(purity_result.to_record())
+                channels_are_single_speaker = bool(
+                    purity_result.value.get("all_channels_single_speaker")
+                )
+            except Exception as exc:  # noqa: BLE001 - QA failures select the mixed route.
+                warnings.append(
+                    {
+                        "type": "moss_channel_purity_check_error",
+                        "message": str(exc),
+                        "sample_id": sample_id,
+                        "audio_path": str(audio_path),
+                        "tool_name": MOSS_DIARIZE_TOOL["tool_name"],
+                    }
+                )
 
-    if channel_candidate:
-        try:
-            _run_channel_activity_speaker_route(
-                audio_path,
-                tool_context,
-                tags,
-                internal_results,
-                warnings,
-                sample_id,
-                duration_sec,
-                config,
-                metrics_config,
-                recording_id,
-                input_kind,
-                target_units,
-                channel_activity_client,
-                artifact_dir,
-                artifact_record_index,
-            )
-            return
-        except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
-            channel_error = exc
-            warnings.append(
-                {
-                    "type": "channel_activity_error",
-                    "message": str(exc),
-                    "sample_id": sample_id,
-                    "audio_path": str(audio_path),
-                    "tool_name": CHANNEL_ACTIVITY_TOOL["tool_name"],
-                }
-            )
+        if channels_are_single_speaker and channel_candidate:
+            try:
+                _run_channel_activity_speaker_route(
+                    audio_path,
+                    tool_context,
+                    tags,
+                    internal_results,
+                    warnings,
+                    sample_id,
+                    duration_sec,
+                    config,
+                    metrics_config,
+                    recording_id,
+                    input_kind,
+                    target_units,
+                    channel_activity_client,
+                    artifact_dir,
+                    artifact_record_index,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
+                channel_error = exc
+                warnings.append(
+                    {
+                        "type": "channel_activity_error",
+                        "message": str(exc),
+                        "sample_id": sample_id,
+                        "audio_path": str(audio_path),
+                        "tool_name": CHANNEL_ACTIVITY_TOOL["tool_name"],
+                    }
+                )
 
-    if separated_channel_input and moss_available and config.prefer_channel_activity:
-        try:
-            _run_moss_merged_headset_speaker_route(
-                audio_path,
-                tool_context,
-                tags,
-                internal_results,
-                warnings,
-                sample_id,
-                duration_sec,
-                config,
-                metrics_config,
-                recording_id,
-                input_kind,
-                target_units,
-                moss_client,
-                artifact_dir,
-                artifact_record_index,
-            )
-            return
-        except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
+        if moss_available:
+            try:
+                _run_moss_merged_headset_speaker_route(
+                    audio_path,
+                    tool_context,
+                    tags,
+                    internal_results,
+                    warnings,
+                    sample_id,
+                    duration_sec,
+                    config,
+                    metrics_config,
+                    recording_id,
+                    input_kind,
+                    target_units,
+                    moss_client,
+                    artifact_dir,
+                    artifact_record_index,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
+                warnings.append(
+                    {
+                        "type": "moss_merged_headset_diarize_error",
+                        "message": str(exc),
+                        "sample_id": sample_id,
+                        "audio_path": str(audio_path),
+                        "tool_name": MOSS_DIARIZE_TOOL["tool_name"],
+                    }
+                )
+
+        if channel_error is None and not moss_available:
+            if channels_are_single_speaker and not config.enable_channel_activity:
+                warning_type = "speaker_channel_activity_disabled"
+                message = "Channel activity is disabled for asserted single-speaker channels"
+            else:
+                warning_type = "speaker_channel_purity_not_configured"
+                message = (
+                    "Separated-headset channel activity requires MOSS channel "
+                    "purity verification or an explicit single-speaker-per-channel assertion"
+                )
             warnings.append(
                 {
-                    "type": "moss_merged_headset_diarize_error",
-                    "message": str(exc),
+                    "type": warning_type,
+                    "message": message,
                     "sample_id": sample_id,
                     "audio_path": str(audio_path),
-                    "tool_name": MOSS_DIARIZE_TOOL["tool_name"],
                 }
             )
+        _null_speaker_tags(tags)
+        return
 
     if not separated_channel_input and moss_available:
         try:
@@ -678,7 +700,7 @@ def _run_speaker_tools(
                 }
             )
 
-    if channel_error is None and not moss_available:
+    if not moss_available:
         warnings.append(
             {
                 "type": "speaker_diarization_not_configured",
@@ -1725,12 +1747,23 @@ def build_arg_parser():
     parser.add_argument(
         "--moss-diarize-enable",
         action="store_true",
-        help="Enable MOSS-Transcribe-Diarize for mixed/mono speaker diarization.",
+        help="Enable MOSS-Transcribe-Diarize speaker diarization.",
+    )
+    parser.add_argument(
+        "--moss-diarize-python",
+        default=None,
+        help=(
+            "Python executable for local MOSS-Transcribe-Diarize subprocess. "
+            "Defaults to local_config.py."
+        ),
     )
     parser.add_argument(
         "--moss-diarize-endpoint",
         default=None,
-        help="OpenAI-compatible MOSS /v1/audio/transcriptions endpoint.",
+        help=(
+            "Legacy OpenAI-compatible MOSS /v1/audio/transcriptions endpoint. "
+            "Ignored when a MOSS subprocess Python is configured."
+        ),
     )
     parser.add_argument(
         "--moss-diarize-model",
@@ -1741,7 +1774,7 @@ def build_arg_parser():
         "--moss-diarize-timeout-sec",
         type=int,
         default=None,
-        help="MOSS diarize HTTP timeout in seconds. Defaults to local_config.py.",
+        help="MOSS diarize legacy HTTP timeout in seconds. Defaults to local_config.py.",
     )
     parser.add_argument(
         "--moss-diarize-max-new-tokens",
@@ -1752,7 +1785,22 @@ def build_arg_parser():
     parser.add_argument(
         "--moss-diarize-api-key",
         default=None,
-        help="Optional bearer token for the MOSS endpoint.",
+        help="Optional bearer token for the legacy MOSS endpoint.",
+    )
+    parser.add_argument(
+        "--moss-diarize-device",
+        default=None,
+        help="Local MOSS device, for example auto, cuda, cuda:0, or cpu.",
+    )
+    parser.add_argument(
+        "--moss-diarize-torch-dtype",
+        default=None,
+        help="Local MOSS torch dtype, for example auto, bfloat16, float16, or float32.",
+    )
+    parser.add_argument(
+        "--moss-diarize-prompt",
+        default=None,
+        help="Optional local MOSS transcription prompt or hotword hint.",
     )
     parser.add_argument(
         "--speaker-channel-activity-disable",
@@ -1763,14 +1811,20 @@ def build_arg_parser():
         "--speaker-prefer-moss",
         action="store_true",
         help=(
-            "Prefer MOSS for separated headset when MOSS is enabled. "
-            "This is now the default and kept for compatibility."
+            "Skip per-channel MOSS purity QA and use merged-headset MOSS directly. "
+            "Kept for compatibility."
         ),
     )
     parser.add_argument(
+        "--speaker-force-channel-activity",
+        "--speaker-single-speaker-per-channel",
         "--speaker-prefer-channel-activity",
+        dest="speaker_force_channel_activity",
         action="store_true",
-        help="Use the legacy channel-activity route before merged-headset MOSS for separated headset.",
+        help=(
+            "Assert that dataset documentation guarantees one speaker per channel "
+            "and run per-channel energy VAD without MOSS purity QA."
+        ),
     )
     parser.add_argument(
         "--artifact-dir",
@@ -1818,11 +1872,16 @@ def main(argv=None):
         moss_timeout_sec=args.moss_diarize_timeout_sec,
         moss_max_new_tokens=args.moss_diarize_max_new_tokens,
         moss_api_key=args.moss_diarize_api_key,
+        moss_python=args.moss_diarize_python,
+        moss_device=args.moss_diarize_device,
+        moss_torch_dtype=args.moss_diarize_torch_dtype,
+        moss_prompt=args.moss_diarize_prompt,
     )
     speaker_config.enable_channel_activity = not args.speaker_channel_activity_disable
     if args.speaker_prefer_moss:
-        speaker_config.prefer_channel_activity = False
-    if args.speaker_prefer_channel_activity:
+        speaker_config.run_moss_for_channel_qa = False
+    if args.speaker_force_channel_activity:
+        speaker_config.force_channel_activity = True
         speaker_config.prefer_channel_activity = True
     summary = run_manifest(
         args.manifest,

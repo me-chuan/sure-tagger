@@ -13,10 +13,11 @@ import wave
 
 from tagger.tools.base import ToolResult
 from tagger.tools.speaker.metrics import normalize_segments
+from tagger.tools.subprocess_runner import run_subprocess_tool
 
 
 TOOL_NAME = "moss_diarizer"
-TOOL_VERSION = "moss_diarizer_v0.1.0"
+TOOL_VERSION = "moss_diarizer_v0.2.0"
 
 
 class MossDiarizeError(RuntimeError):
@@ -31,21 +32,177 @@ class MossDiarizeConfig:
         timeout_sec=900,
         max_new_tokens=65536,
         api_key="",
+        subprocess_python="",
+        device="auto",
+        torch_dtype="auto",
+        trust_remote_code=True,
+        prompt="",
     ):
         self.endpoint = endpoint or ""
         self.model = model or "OpenMOSS-Team/MOSS-Transcribe-Diarize"
         self.timeout_sec = int(timeout_sec)
         self.max_new_tokens = int(max_new_tokens)
         self.api_key = api_key or ""
+        self.subprocess_python = subprocess_python or ""
+        self.device = device or "auto"
+        self.torch_dtype = torch_dtype or "auto"
+        self.trust_remote_code = bool(trust_remote_code)
+        self.prompt = prompt or ""
+
+    def cache_key(self):
+        return (
+            self.model,
+            self.max_new_tokens,
+            self.device,
+            self.torch_dtype,
+            self.trust_remote_code,
+            self.prompt,
+            self.subprocess_python,
+        )
+
+    def to_record(self):
+        return {
+            "endpoint": self.endpoint,
+            "model": self.model,
+            "timeout_sec": self.timeout_sec,
+            "max_new_tokens": self.max_new_tokens,
+            "api_key_configured": bool(self.api_key),
+            "subprocess_python": self.subprocess_python,
+            "device": self.device,
+            "torch_dtype": self.torch_dtype,
+            "trust_remote_code": self.trust_remote_code,
+            "prompt_configured": bool(self.prompt),
+        }
+
+
+class MossDiarizeClient:
+    """Adapter around the local OpenMOSS Transformers implementation."""
+
+    def __init__(self, config=None):
+        self.config = config or MossDiarizeConfig()
+        self._runtime = None
+
+    def diarize(self, audio_path, context=None):
+        runtime = self._get_runtime(context)
+        messages = _build_transcription_messages(
+            runtime["build_transcription_messages"],
+            audio_path,
+            self.config.prompt,
+        )
+        try:
+            result = runtime["generate_transcription"](
+                runtime["model"],
+                runtime["processor"],
+                messages,
+                max_new_tokens=self.config.max_new_tokens,
+                do_sample=False,
+                device=runtime["device"],
+                dtype=runtime["dtype"],
+            )
+        except Exception as exc:  # noqa: BLE001 - normalized to a tool error.
+            raise MossDiarizeError(
+                "local MOSS diarize inference failed: %s" % exc
+            ) from exc
+
+        if isinstance(result, dict):
+            text = result.get("text", "")
+            payload = dict(result)
+        else:
+            text = str(result)
+            payload = {"text": text}
+        if not isinstance(text, str):
+            text = str(text)
+            payload["text"] = text
+
+        segments = _segments_from_openmoss_parse(
+            runtime["parse_transcript"],
+            text,
+        )
+        if segments:
+            payload["segments"] = segments
+        return payload
+
+    def _get_runtime(self, context=None):
+        if context is None:
+            if self._runtime is None:
+                self._runtime = self._load_runtime()
+            return self._runtime
+
+        cache = context.setdefault("moss_diarize_runtime_by_config", {})
+        key = self.config.cache_key()
+        if key not in cache:
+            cache[key] = self._load_runtime()
+        return cache[key]
+
+    def _load_runtime(self):
+        (
+            torch,
+            AutoModelForCausalLM,
+            AutoProcessor,
+            parse_transcript,
+            build_transcription_messages,
+            generate_transcription,
+            resolve_device,
+        ) = _load_openmoss_dependencies()
+        try:
+            device = resolve_device(self.config.device)
+            dtype = _resolve_torch_dtype(torch, self.config.torch_dtype, device)
+            model = _load_openmoss_model(AutoModelForCausalLM, self.config)
+            model = model.to(dtype=dtype).to(device).eval()
+            processor = AutoProcessor.from_pretrained(
+                self.config.model,
+                trust_remote_code=self.config.trust_remote_code,
+            )
+        except Exception as exc:  # noqa: BLE001 - normalized to a tool error.
+            raise MossDiarizeError(
+                "local MOSS diarize runtime loading failed: %s" % exc
+            ) from exc
+        return {
+            "model": model,
+            "processor": processor,
+            "device": device,
+            "dtype": dtype,
+            "parse_transcript": parse_transcript,
+            "build_transcription_messages": build_transcription_messages,
+            "generate_transcription": generate_transcription,
+        }
+
+
+class MossDiarizeSubprocessClient:
+    """Adapter that runs local MOSS in its configured Python environment."""
+
+    def __init__(self, config=None):
+        self.config = config or MossDiarizeConfig()
+
+    def diarize(self, audio_path, context=None):
+        result = run_subprocess_tool(
+            self.config.subprocess_python,
+            "moss_diarize_estimate",
+            {
+                "audio_path": str(audio_path),
+                "config": _subprocess_config(self.config),
+            },
+            context=context,
+        )
+        return result["output"]
+
+
+class MossDiarizeHttpClient:
+    """Legacy OpenAI-compatible HTTP adapter."""
+
+    def __init__(self, config=None):
+        self.config = config or MossDiarizeConfig()
+
+    def diarize(self, audio_path, context=None):
+        del context
+        return call_moss_http(audio_path, self.config)
 
 
 def run(audio_path, duration_sec=None, context=None, config=None, client=None, **_kwargs):
     # type: (Union[str, Path], Optional[float], Optional[Dict[str, Any]], Optional[MossDiarizeConfig], Any, Any) -> ToolResult
     config = config or MossDiarizeConfig()
-    if client is not None:
-        payload = client.diarize(audio_path, context=context)
-    else:
-        payload = call_moss_http(audio_path, config)
+    client = client or _default_client(config)
+    payload = client.diarize(audio_path, context=context)
     segments = parse_moss_output(payload)
     if duration_sec is None:
         duration_sec = _duration_from_payload(payload)
@@ -70,8 +227,132 @@ def run(audio_path, duration_sec=None, context=None, config=None, client=None, *
         evidence={
             "segment_count": len(segments),
             "model": config.model,
+            "config": config.to_record(),
         },
     )
+
+
+def _default_client(config):
+    if config.subprocess_python:
+        return MossDiarizeSubprocessClient(config)
+    if config.endpoint:
+        return MossDiarizeHttpClient(config)
+    return MossDiarizeClient(config)
+
+
+def _subprocess_config(config):
+    return {
+        "endpoint": "",
+        "model": config.model,
+        "timeout_sec": config.timeout_sec,
+        "max_new_tokens": config.max_new_tokens,
+        "api_key": "",
+        "subprocess_python": "",
+        "device": config.device,
+        "torch_dtype": config.torch_dtype,
+        "trust_remote_code": config.trust_remote_code,
+        "prompt": config.prompt,
+    }
+
+
+def _load_openmoss_dependencies():
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoProcessor
+        from moss_transcribe_diarize import parse_transcript
+        from moss_transcribe_diarize.inference_utils import (
+            build_transcription_messages,
+            generate_transcription,
+            resolve_device,
+        )
+    except ImportError as exc:
+        raise MossDiarizeError(
+            "local MOSS requires the OpenMOSS package, transformers, and torch "
+            "in the configured Python environment"
+        ) from exc
+    return (
+        torch,
+        AutoModelForCausalLM,
+        AutoProcessor,
+        parse_transcript,
+        build_transcription_messages,
+        generate_transcription,
+        resolve_device,
+    )
+
+
+def _load_openmoss_model(AutoModelForCausalLM, config):
+    kwargs = {"trust_remote_code": config.trust_remote_code}
+    try:
+        return AutoModelForCausalLM.from_pretrained(
+            config.model,
+            dtype="auto",
+            **kwargs
+        )
+    except TypeError:
+        return AutoModelForCausalLM.from_pretrained(
+            config.model,
+            torch_dtype="auto",
+            **kwargs
+        )
+
+
+def _resolve_torch_dtype(torch, dtype_name, device):
+    name = str(dtype_name or "auto").lower()
+    if name == "auto":
+        device_type = getattr(device, "type", str(device))
+        return torch.bfloat16 if device_type == "cuda" else torch.float32
+    dtype = getattr(torch, name, None)
+    if dtype is None:
+        raise MossDiarizeError("unsupported MOSS torch dtype: %s" % dtype_name)
+    return dtype
+
+
+def _build_transcription_messages(build_transcription_messages, audio_path, prompt):
+    if prompt:
+        try:
+            return build_transcription_messages(str(audio_path), prompt=prompt)
+        except TypeError:
+            try:
+                return build_transcription_messages(str(audio_path), prompt)
+            except TypeError as exc:
+                raise MossDiarizeError(
+                    "OpenMOSS build_transcription_messages does not accept prompt"
+                ) from exc
+    return build_transcription_messages(str(audio_path))
+
+
+def _segments_from_openmoss_parse(parse_transcript, text):
+    try:
+        parsed = parse_transcript(text)
+    except Exception as exc:  # noqa: BLE001 - normalized to a tool error.
+        raise MossDiarizeError("OpenMOSS transcript parsing failed") from exc
+    segments = []
+    for item in parsed:
+        start = _object_value(item, "start", "start_sec")
+        end = _object_value(item, "end", "end_sec")
+        speaker = _object_value(item, "speaker", "speaker_id", "label")
+        if start is None or end is None or speaker is None:
+            continue
+        segment = {
+            "start_sec": start,
+            "end_sec": end,
+            "speaker_id": speaker,
+        }
+        text_value = _object_value(item, "text")
+        if text_value:
+            segment["text"] = text_value
+        segments.append(segment)
+    return segments
+
+
+def _object_value(item, *names):
+    for name in names:
+        if isinstance(item, dict) and name in item:
+            return item[name]
+        if hasattr(item, name):
+            return getattr(item, name)
+    return None
 
 
 def run_merged_channels(audio_path, duration_sec=None, context=None, config=None, client=None, **_kwargs):
@@ -102,6 +383,62 @@ def run_merged_channels(audio_path, duration_sec=None, context=None, config=None
             "input_channel_count": mixed["channel_count"],
             "mixdown_method": mixed["method"],
             "segment_count": len(value.get("segments", [])),
+            "model": config.model,
+        },
+    )
+
+
+def run_channel_purity_check(audio_path, duration_sec=None, context=None, config=None, client=None, **_kwargs):
+    # type: (Union[str, Path], Optional[float], Optional[Dict[str, Any]], Optional[MossDiarizeConfig], Any, Any) -> ToolResult
+    config = config or MossDiarizeConfig()
+    path = Path(audio_path)
+    channel_results = []
+    with tempfile.TemporaryDirectory(prefix="sure_tagger_moss_channel_qa_") as tmpdir:
+        split = split_multichannel_wav(path, Path(tmpdir))
+        for channel_index, channel_path in enumerate(split["paths"]):
+            channel_context = dict(context or {})
+            channel_context.update({
+                "speaker_route_phase": "channel_purity_check",
+                "source_channel_id": "ch%s" % channel_index,
+            })
+            result = run(
+                channel_path,
+                duration_sec=duration_sec,
+                context=channel_context,
+                config=config,
+                client=client,
+            )
+            speaker_ids = sorted(set(
+                str(item["speaker_id"])
+                for item in result.value.get("segments", [])
+                if item.get("speaker_id") is not None
+            ))
+            channel_results.append({
+                "channel_id": "ch%s" % channel_index,
+                "speaker_count": len(speaker_ids),
+                "speaker_ids": speaker_ids,
+            })
+    all_single_speaker = bool(channel_results) and all(
+        item["speaker_count"] == 1 for item in channel_results
+    )
+    value = {
+        "metadata_version": "moss_channel_purity_v0.1",
+        "all_channels_single_speaker": all_single_speaker,
+        "channels": channel_results,
+    }
+    return ToolResult(
+        tag_path="speaker.channel_purity",
+        value=value,
+        tool_name=TOOL_NAME,
+        method="moss_per_channel_speaker_purity",
+        status="estimated",
+        confidence=0.85,
+        tool_type="model",
+        tool_version=TOOL_VERSION,
+        evidence={
+            "input_channel_count": split["channel_count"],
+            "channel_split_method": split["method"],
+            "all_channels_single_speaker": all_single_speaker,
             "model": config.model,
         },
     )
@@ -311,6 +648,105 @@ def mixdown_multichannel_wav(audio_path, output_dir):
         return _mixdown_multichannel_wav_python(path, output_dir)
     except wave.Error:
         return _mixdown_multichannel_wav_ffmpeg(path, output_dir)
+
+
+def split_multichannel_wav(audio_path, output_dir):
+    # type: (Union[str, Path], Path) -> Dict[str, Any]
+    path = Path(audio_path)
+    try:
+        return _split_multichannel_wav_python(path, output_dir)
+    except wave.Error:
+        return _split_multichannel_wav_ffmpeg(path, output_dir)
+
+
+def _split_multichannel_wav_python(path, output_dir):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    writers = []
+    output_paths = []
+    with wave.open(str(path), "rb") as source:
+        channels = source.getnchannels()
+        if channels < 2:
+            raise MossDiarizeError("MOSS channel purity check requires at least two channels")
+        sample_width = source.getsampwidth()
+        sample_rate = source.getframerate()
+        try:
+            for channel_index in range(channels):
+                output_path = output_dir / (
+                    "%s.channel_%03d.wav" % (path.stem, channel_index)
+                )
+                writer = wave.open(str(output_path), "wb")
+                writer.setnchannels(1)
+                writer.setsampwidth(sample_width)
+                writer.setframerate(sample_rate)
+                writers.append(writer)
+                output_paths.append(output_path)
+            frame_size = channels * sample_width
+            while True:
+                raw = source.readframes(16000)
+                if not raw:
+                    break
+                frame_count = len(raw) // frame_size
+                for channel_index, writer in enumerate(writers):
+                    mono = bytearray(frame_count * sample_width)
+                    for frame_index in range(frame_count):
+                        source_offset = frame_index * frame_size + channel_index * sample_width
+                        target_offset = frame_index * sample_width
+                        mono[target_offset:target_offset + sample_width] = raw[
+                            source_offset:source_offset + sample_width
+                        ]
+                    writer.writeframes(mono)
+        finally:
+            for writer in writers:
+                writer.close()
+    return {
+        "paths": output_paths,
+        "channel_count": channels,
+        "sample_rate_hz": sample_rate,
+        "method": "python_wave_channel_split",
+    }
+
+
+def _split_multichannel_wav_ffmpeg(path, output_dir):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    info = _ffprobe_audio_info(path)
+    channels = int(info["channels"])
+    sample_rate = int(info["sample_rate"])
+    if channels < 2:
+        raise MossDiarizeError("MOSS channel purity check requires at least two channels")
+    output_paths = []
+    for channel_index in range(channels):
+        output_path = output_dir / (
+            "%s.channel_%03d.wav" % (path.stem, channel_index)
+        )
+        command = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(path),
+            "-map",
+            "0:a:0",
+            "-af",
+            "pan=mono|c0=c%s" % channel_index,
+            "-ar",
+            str(sample_rate),
+            str(output_path),
+        ]
+        try:
+            subprocess.check_call(command)
+        except OSError as exc:
+            raise MossDiarizeError("ffmpeg is required for MOSS channel purity check") from exc
+        except subprocess.CalledProcessError as exc:
+            raise MossDiarizeError("ffmpeg channel split failed for %s" % path) from exc
+        output_paths.append(output_path)
+    return {
+        "paths": output_paths,
+        "channel_count": channels,
+        "sample_rate_hz": sample_rate,
+        "method": "ffmpeg_channel_split",
+    }
 
 
 def _mixdown_multichannel_wav_python(path, output_dir):

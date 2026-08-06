@@ -10,7 +10,7 @@ from tagger.tools.base import ToolResult
 
 
 TOOL_NAME = "channel_speech_activity_detector"
-TOOL_VERSION = "channel_activity_v0.1.0"
+TOOL_VERSION = "channel_activity_v0.2.0"
 
 
 class ChannelActivityError(RuntimeError):
@@ -21,7 +21,7 @@ class ChannelActivityConfig:
     def __init__(
         self,
         window_sec=0.05,
-        energy_threshold=500.0,
+        energy_threshold=200.0,
         leakage_relative_db=-18.0,
         min_segment_duration_sec=0.10,
         merge_gap_sec=0.30,

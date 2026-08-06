@@ -20,6 +20,10 @@ Fill DNSMOS_* with the local Microsoft DNSMOS ONNX models before running
 no-reference speech quality tagging. The defaults match the sparse checkout in
 models/DNS-Challenge.
 
+Fill MOSS_DIARIZE_* with the local OpenMOSS MOSS-Transcribe-Diarize Python
+environment before running speaker diarization. This project calls the local
+model directly instead of requiring a hosted API service.
+
 Model tools can run in subprocesses so incompatible model dependencies do not
 need to share one Python environment.
 """
@@ -64,9 +68,13 @@ MOSS_DIARIZE_MODEL = "OpenMOSS-Team/MOSS-Transcribe-Diarize"
 MOSS_DIARIZE_TIMEOUT_SEC = 900
 MOSS_DIARIZE_MAX_NEW_TOKENS = 65536
 MOSS_DIARIZE_API_KEY = ""
+MOSS_DIARIZE_PYTHON = ".runtime/moss_transcribe_diarize_py312/bin/python"
+MOSS_DIARIZE_DEVICE = "auto"
+MOSS_DIARIZE_TORCH_DTYPE = "auto"
+MOSS_DIARIZE_PROMPT = ""
 
 SPEAKER_CHANNEL_WINDOW_SEC = 0.05
-SPEAKER_CHANNEL_ENERGY_THRESHOLD = 500.0
+SPEAKER_CHANNEL_ENERGY_THRESHOLD = 200.0
 SPEAKER_CHANNEL_LEAKAGE_RELATIVE_DB = -18.0
 SPEAKER_MIN_SEGMENT_DURATION_SEC = 0.10
 SPEAKER_MERGE_SAME_SPEAKER_GAP_SEC = 0.30
