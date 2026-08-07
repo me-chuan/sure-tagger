@@ -1,6 +1,6 @@
 # Language Content Tools
 
-Language-content tools run inside the root signal pipeline. Deterministic tools
+Language-content tools run inside the root tagging pipeline. Deterministic tools
 only require `sample.text.transcript`; topic classification is optional and uses
 an OpenAI-compatible Responses API when enabled.
 
@@ -19,7 +19,7 @@ Topic classification is disabled by default so normal pipeline runs do not make
 external API calls. Enable it with:
 
 ```bash
-python3 scripts/run_signal.py \
+python3 scripts/run_tagger.py \
   --manifest path/to/manifest.jsonl \
   --output outputs/tags.jsonl \
   --topic-enable \

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compatibility wrapper for scripts/run_tagger.py."""
+"""Run sample-level ASR dataset tagging on a raw-only manifest."""
 
 from pathlib import Path
 import sys

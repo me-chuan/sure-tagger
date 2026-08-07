@@ -10,15 +10,15 @@ import wave
 
 from scripts.run_c50_method_comparison import compare_record as compare_c50_record
 from tagger.input_schema import InputSchemaError, validate_input_record
-from tagger.pipelines.signal import (
+from tagger.pipelines.tagging import (
     audit_basic_acoustic,
     audit_speaker,
     audit_sound_field_scene,
     build_arg_parser,
     empty_tags,
     resolve_audio_path,
-    run_manifest as run_signal_manifest,
-    tag_record as tag_signal_record,
+    run_manifest as run_tagging_manifest,
+    tag_record as tag_sample_record,
 )
 from tagger.tools.acoustic_io import probe_audio_info
 from tagger.tools.basic_acoustic.brouhaha_signal_estimator import (
@@ -111,7 +111,7 @@ class AcousticToolsTest(unittest.TestCase):
         resolved = resolve_audio_path(sample, "phase1_asr_samples")
         self.assertEqual(resolved, Path.cwd() / "phase1_asr_samples/manifest.jsonl")
 
-    def test_signal_tag_record_returns_signal_and_sound_field_tags_only(self):
+    def test_tagging_record_returns_acoustic_and_sound_field_tags_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "tone.wav"
             write_test_wav(path, sample_rate=16000, channels=1, duration_sec=1.0)
@@ -131,7 +131,7 @@ class AcousticToolsTest(unittest.TestCase):
                 subprocess_python="",
             )
 
-            tags = tag_signal_record(
+            tags = tag_sample_record(
                 make_record(str(path)),
                 tmpdir,
                 config,
@@ -230,12 +230,12 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertTrue(tags["sound_field_scene"]["music"])
             self.assertEqual(tags["sound_field_scene"]["sound"], ["Traffic noise"])
 
-    def test_signal_tag_record_populates_deterministic_language_content_without_audio(self):
+    def test_tagging_record_populates_deterministic_language_content_without_audio(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             record = make_record("missing.wav")
             record["sample"]["text"]["transcript"] = "Um hello hello."
 
-            tags = tag_signal_record(record, tmpdir)
+            tags = tag_sample_record(record, tmpdir)
 
             self.assertIsNone(tags["language_content"]["topic"])
             self.assertEqual(tags["language_content"]["language"], "en")
@@ -256,7 +256,7 @@ class AcousticToolsTest(unittest.TestCase):
             )
             self.assertEqual(tags["language_content"]["filler"], 1)
 
-    def test_signal_pipeline_prefers_native_metadata_segments_for_vad_and_speaker(self):
+    def test_tagging_pipeline_prefers_native_metadata_segments_for_vad_and_speaker(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "meeting.wav"
             write_test_wav(path, sample_rate=16000, channels=1, duration_sec=5.0)
@@ -280,11 +280,11 @@ class AcousticToolsTest(unittest.TestCase):
                 ]
             }
 
-            tags = tag_signal_record(
+            tags = tag_sample_record(
                 record,
                 tmpdir,
                 speaker_config=default_speaker_layer_config(enable_moss=False),
-                **missing_signal_model_configs(tmpdir)
+                **missing_external_model_configs(tmpdir)
             )
 
             self.assertEqual(
@@ -299,7 +299,7 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertTrue(tags["speaker"]["speaker_change"])
             self.assertTrue(tags["speaker"]["speaker_overlap"])
 
-    def test_signal_tag_record_populates_openai_responses_topic_when_enabled(self):
+    def test_tagging_record_populates_openai_responses_topic_when_enabled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             record = make_record("missing.wav")
             record["sample"]["text"]["transcript"] = (
@@ -317,7 +317,7 @@ class AcousticToolsTest(unittest.TestCase):
                 }
             )
 
-            tags = tag_signal_record(
+            tags = tag_sample_record(
                 record,
                 tmpdir,
                 topic_config=TopicConfig(enabled=True, cache_enabled=False),
@@ -330,7 +330,7 @@ class AcousticToolsTest(unittest.TestCase):
             )
             self.assertEqual(client.call_count, 1)
 
-    def test_signal_topic_short_utterance_guard_skips_openai_responses_call(self):
+    def test_topic_short_utterance_guard_skips_openai_responses_call(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             record = make_record("missing.wav")
             record["sample"]["text"]["transcript"] = "Yeah."
@@ -346,7 +346,7 @@ class AcousticToolsTest(unittest.TestCase):
                 }
             )
 
-            tags = tag_signal_record(
+            tags = tag_sample_record(
                 record,
                 tmpdir,
                 topic_config=TopicConfig(enabled=True, cache_enabled=False),
@@ -358,6 +358,73 @@ class AcousticToolsTest(unittest.TestCase):
                 "other/insufficient_context",
             )
             self.assertEqual(client.call_count, 0)
+
+    def test_tagging_pipeline_skips_speech_dependent_stages_without_transcript(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "noise.wav"
+            write_test_wav(path, sample_rate=16000, channels=1, duration_sec=2.0)
+            record = make_record(str(path))
+            record["sample"]["text"]["transcript"] = ""
+            topic_client = FakeTopicClient(
+                {
+                    "major_topic": "daily_life_social",
+                    "minor_topic": "small_talk",
+                    "confidence": 0.8,
+                    "topic_keywords": [],
+                    "proper_nouns": [],
+                    "reason_short": "Should not be called.",
+                    "secondary_topics": [],
+                }
+            )
+            dnsmos_client = FakeDnsmosClient(
+                {
+                    "sig": 3.0,
+                    "bak": 3.0,
+                    "ovr": 3.0,
+                    "p808_mos": 3.0,
+                }
+            )
+            moss_client = FakeMossClient({"segments": [{"speaker": "A", "start": 0, "end": 1}]})
+            recrir_client = FakeRecRirClient(
+                {
+                    "metadata_version": "rec_rir_v0.1",
+                    "sample_rate_hz": 16000,
+                    "rir": [1.0, 0.0],
+                }
+            )
+
+            tags = tag_sample_record(
+                record,
+                tmpdir,
+                speaker_config=default_speaker_layer_config(enable_moss=True),
+                moss_client=moss_client,
+                dnsmos_client=dnsmos_client,
+                recrir_client=recrir_client,
+                topic_config=TopicConfig(enabled=True, cache_enabled=False),
+                topic_client=topic_client,
+                selected_tag_paths=[
+                    "language_content",
+                    "basic_acoustic.silence_ratio",
+                    "basic_acoustic.dnsmos_ovrl",
+                    "speaker",
+                    "sound_field_scene.rt60",
+                ],
+                **missing_external_model_configs(tmpdir)
+            )
+
+            self.assertEqual(topic_client.call_count, 0)
+            self.assertEqual(dnsmos_client.call_count, 0)
+            self.assertEqual(moss_client.audio_names, [])
+            self.assertEqual(recrir_client.call_count, 0)
+            self.assertTrue(all(value is None for value in tags["language_content"].values()))
+            self.assertIsNone(tags["basic_acoustic"]["silence_segments"])
+            self.assertIsNone(tags["basic_acoustic"]["silence_ratio"])
+            self.assertIsNone(tags["basic_acoustic"]["dnsmos_ovrl"])
+            self.assertIsNone(tags["sound_field_scene"]["rt60"])
+            self.assertIsNone(tags["sound_field_scene"]["c50"])
+            self.assertFalse(tags["speaker"]["multi_speaker"])
+            self.assertFalse(tags["speaker"]["speaker_change"])
+            self.assertFalse(tags["speaker"]["speaker_overlap"])
 
     def test_topic_validation_repairs_known_minor_under_wrong_major(self):
         payload = {
@@ -889,7 +956,7 @@ class AcousticToolsTest(unittest.TestCase):
             ["dnsmos_sig", "dnsmos_bak", "dnsmos_ovrl"],
         )
 
-    def test_signal_pipeline_uses_injected_recrir_client_for_non_model_input_audio(self):
+    def test_tagging_pipeline_uses_injected_recrir_client_for_non_model_input_audio(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "tone.wav"
             write_test_wav(path, sample_rate=8000, channels=2, duration_sec=1.0)
@@ -899,7 +966,7 @@ class AcousticToolsTest(unittest.TestCase):
             ]
             artifact_dir = Path(tmpdir) / "artifacts"
 
-            tags = tag_signal_record(
+            tags = tag_sample_record(
                 make_record(str(path)),
                 tmpdir,
                 firered_vad_config=FireRedVadConfig(
@@ -964,7 +1031,7 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertEqual(artifact["sample_rate_hz"], 16000)
             self.assertEqual(len(artifact["samples"]), len(rir_samples))
 
-    def test_signal_pipeline_isolates_music_and_sound_failures(self):
+    def test_tagging_pipeline_isolates_music_and_sound_failures(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "tone.wav"
             write_test_wav(path, sample_rate=16000, channels=1, duration_sec=1.0)
@@ -997,7 +1064,7 @@ class AcousticToolsTest(unittest.TestCase):
                 "event2ratio": {"speech": 0.0, "singing": 0.0, "music": 0.8},
             }
 
-            panns_failure = tag_signal_record(
+            panns_failure = tag_sample_record(
                 make_record(str(path)),
                 tmpdir,
                 firered_aed_client=FakeFireRedAedClient(fire_output),
@@ -1006,7 +1073,7 @@ class AcousticToolsTest(unittest.TestCase):
                 ),
                 **common
             )
-            fire_failure = tag_signal_record(
+            fire_failure = tag_sample_record(
                 make_record(str(path)),
                 tmpdir,
                 firered_aed_client=FakeFireRedAedClient({}),
@@ -1263,14 +1330,14 @@ class AcousticToolsTest(unittest.TestCase):
                 ["ch0", "ch1"],
             )
 
-    def test_signal_pipeline_uses_injected_moss_client_for_speaker_tags(self):
+    def test_tagging_pipeline_uses_injected_moss_client_for_speaker_tags(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "mono.wav"
             write_test_wav(path, sample_rate=8000, channels=1, duration_sec=2.0)
             artifact_dir = Path(tmpdir) / "artifacts"
-            common = missing_signal_model_configs(tmpdir)
+            common = missing_external_model_configs(tmpdir)
 
-            tags = tag_signal_record(
+            tags = tag_sample_record(
                 make_record(str(path)),
                 tmpdir,
                 speaker_config=default_speaker_layer_config(enable_moss=True),
@@ -1299,7 +1366,7 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertEqual(artifact["primary_route"], "moss_diarize")
             self.assertEqual(artifact["recording_summary"]["speaker_count"], 2)
 
-    def test_signal_pipeline_derives_speaker_target_unit_from_ami_utterance_metadata(self):
+    def test_tagging_pipeline_derives_speaker_target_unit_from_ami_utterance_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "EN2001a_utt_00000.wav"
             write_test_wav(path, sample_rate=8000, channels=1, duration_sec=0.8)
@@ -1318,9 +1385,9 @@ class AcousticToolsTest(unittest.TestCase):
                     {"w": ".", "start": 3.88, "end": 3.88},
                 ],
             }
-            common = missing_signal_model_configs(tmpdir)
+            common = missing_external_model_configs(tmpdir)
 
-            tags = tag_signal_record(
+            tags = tag_sample_record(
                 record,
                 tmpdir,
                 speaker_config=default_speaker_layer_config(enable_moss=True),
@@ -1356,14 +1423,14 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertEqual(utterance["end_sec"], 0.8)
             self.assertEqual(utterance["primary_speaker_id"], "spk_001")
 
-    def test_signal_pipeline_uses_merged_headset_moss_for_separated_headset(self):
+    def test_tagging_pipeline_uses_merged_headset_moss_for_separated_headset(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "headset.wav"
             write_test_wav(path, sample_rate=8000, channels=2, duration_sec=2.0)
             artifact_dir = Path(tmpdir) / "artifacts"
             record = make_record(str(path))
             record["sample"]["native_metadata"]["microphone_type"] = "Headset"
-            common = missing_signal_model_configs(tmpdir)
+            common = missing_external_model_configs(tmpdir)
 
             moss_client = FakeMossClient(
                 {
@@ -1373,7 +1440,7 @@ class AcousticToolsTest(unittest.TestCase):
                     ]
                 }
             )
-            tags = tag_signal_record(
+            tags = tag_sample_record(
                 record,
                 tmpdir,
                 speaker_config=default_speaker_layer_config(enable_moss=True),
@@ -1401,7 +1468,7 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertEqual(moss_client.input_channel_counts, [1, 1, 1])
             self.assertIn("merged_mono", moss_client.audio_names[-1])
 
-    def test_signal_pipeline_uses_channel_activity_after_moss_purity_check(self):
+    def test_tagging_pipeline_uses_channel_activity_after_moss_purity_check(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "headset.wav"
             write_test_wav(path, sample_rate=8000, channels=2, duration_sec=2.0)
@@ -1439,7 +1506,7 @@ class AcousticToolsTest(unittest.TestCase):
                 }
             )
 
-            tags = tag_signal_record(
+            tags = tag_sample_record(
                 record,
                 tmpdir,
                 speaker_config=default_speaker_layer_config(enable_moss=True),
@@ -1480,7 +1547,7 @@ class AcousticToolsTest(unittest.TestCase):
                 }
             )
 
-            tags = tag_signal_record(
+            tags = tag_sample_record(
                 make_record(str(path)),
                 tmpdir,
                 speaker_config=config,
@@ -1515,7 +1582,7 @@ class AcousticToolsTest(unittest.TestCase):
                 }
             )
 
-            tags = tag_signal_record(
+            tags = tag_sample_record(
                 make_record(str(path)),
                 tmpdir,
                 speaker_config=default_speaker_layer_config(enable_moss=False),
@@ -1570,7 +1637,7 @@ class AcousticToolsTest(unittest.TestCase):
         self.assertEqual(args.only_tags, "speaker,language_content.topic")
         self.assertTrue(args.missing_only)
 
-    def test_signal_manifest_passes_injected_channel_activity_client(self):
+    def test_tagging_manifest_passes_injected_channel_activity_client(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "stereo.wav"
             write_test_wav(path, sample_rate=8000, channels=2, duration_sec=2.0)
@@ -1578,9 +1645,9 @@ class AcousticToolsTest(unittest.TestCase):
             output_path = Path(tmpdir) / "tags.jsonl"
             with manifest_path.open("w", encoding="utf-8") as sink:
                 sink.write(json.dumps(make_record(str(path)), ensure_ascii=False) + "\n")
-            common = missing_signal_model_configs(tmpdir)
+            common = missing_external_model_configs(tmpdir)
 
-            run_signal_manifest(
+            run_tagging_manifest(
                 manifest_path,
                 output_path,
                 speaker_config=_forced_channel_activity_config(),
@@ -1616,7 +1683,7 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertTrue(tags["speaker"]["speaker_overlap"])
             self.assertNotIn("channel_activity", tags["speaker"])
 
-    def test_signal_manifest_supplements_selected_sample_tags_from_existing_output(self):
+    def test_tagging_manifest_supplements_selected_sample_tags_from_existing_output(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             manifest_path = Path(tmpdir) / "manifest.jsonl"
             input_tags_path = Path(tmpdir) / "existing_tags.jsonl"
@@ -1638,7 +1705,7 @@ class AcousticToolsTest(unittest.TestCase):
                 sink.write(json.dumps(first_tags, ensure_ascii=False) + "\n")
                 sink.write(json.dumps(second_tags, ensure_ascii=False) + "\n")
 
-            summary = run_signal_manifest(
+            summary = run_tagging_manifest(
                 manifest_path,
                 output_path,
                 sample_ids=["first"],
@@ -1654,13 +1721,13 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertEqual(rows[1]["language_content"]["filler"], 99)
             self.assertIsNone(rows[0]["basic_acoustic"]["duration_sec"])
 
-    def test_signal_pipeline_does_not_treat_mix_headset_stereo_as_separated_channels(self):
+    def test_tagging_pipeline_does_not_treat_mix_headset_stereo_as_separated_channels(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "sample.Mix-Headset.wav"
             write_test_wav(path, sample_rate=8000, channels=2, duration_sec=2.0)
-            common = missing_signal_model_configs(tmpdir)
+            common = missing_external_model_configs(tmpdir)
 
-            tags = tag_signal_record(
+            tags = tag_sample_record(
                 make_record(str(path)),
                 tmpdir,
                 speaker_config=default_speaker_layer_config(enable_moss=False),
@@ -1748,8 +1815,10 @@ class FakeBrouhahaClient:
 class FakeDnsmosClient:
     def __init__(self, output):
         self.output = output
+        self.call_count = 0
 
     def estimate(self, audio_path, context=None):
+        self.call_count += 1
         return self.output
 
 
@@ -1768,8 +1837,10 @@ class FakeTopicClient:
 class FakeRecRirClient:
     def __init__(self, output):
         self.output = output
+        self.call_count = 0
 
     def estimate_rir(self, audio_path, context=None):
+        self.call_count += 1
         return self.output
 
 
@@ -1822,7 +1893,7 @@ class FakeChannelActivityClient:
         return self.output
 
 
-def missing_signal_model_configs(tmpdir):
+def missing_external_model_configs(tmpdir):
     root = Path(tmpdir)
     return {
         "firered_vad_config": FireRedVadConfig(

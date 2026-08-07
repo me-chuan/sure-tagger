@@ -22,7 +22,7 @@ cd ../..
 运行时只需要把 pipeline 指到这个 Python：
 
 ```bash
-python3 scripts/run_signal.py \
+python3 scripts/run_tagger.py \
   --manifest outputs/moss_smoke/ami_ES2005a_mix_headset_manifest.jsonl \
   --output outputs/moss_smoke/ami_ES2005a_moss_tags.jsonl \
   --artifact-dir outputs/moss_smoke/artifacts \
@@ -54,7 +54,7 @@ pipeline 就会走本地 subprocess。
 AMI 原始 separated headset 如果是多个文件（例如 `ES2005a.Headset-0.wav` 到 `ES2005a.Headset-3.wav`），生产输入应先把这些 headset 合成同一段多通道 WAV 或对应的 utterance-level 多通道切片，再写入 `sample.audio.path`。不要把单个 `Headset-N` 文件作为生产 speaker route 输入；单通道 headset 只适合作诊断。
 
 ```bash
-python3 scripts/run_signal.py \
+python3 scripts/run_tagger.py \
   --manifest path/to/headset_manifest.jsonl \
   --output outputs/headset_tags.jsonl \
   --artifact-dir outputs/artifacts \
@@ -66,7 +66,7 @@ python3 scripts/run_signal.py \
 如果数据集说明明确保证一个通道只对应一个说话人，可以跳过 MOSS purity check，显式强制使用 channel activity：
 
 ```bash
-python3 scripts/run_signal.py \
+python3 scripts/run_tagger.py \
   --manifest path/to/headset_manifest.jsonl \
   --output outputs/headset_tags.jsonl \
   --speaker-single-speaker-per-channel
@@ -82,7 +82,7 @@ Channel activity 默认使用 50 ms RMS 窗口，绝对能量阈值为 200，相
 
 ### 1. Audio Probe
 
-`tagger.pipelines.signal` 先读取 `sample.audio.path`，用 audio probe 得到：
+`tagger.pipelines.tagging` 先读取 `sample.audio.path`，用 audio probe 得到：
 
 ```text
 duration_sec
@@ -182,5 +182,5 @@ tagger/tools/speaker/channel_activity.py
 tagger/tools/speaker/metrics.py
 tagger/tools/speaker/artifacts.py
 tagger/tools/speaker/registry.py
-tagger/pipelines/signal.py
+tagger/pipelines/tagging.py
 ```

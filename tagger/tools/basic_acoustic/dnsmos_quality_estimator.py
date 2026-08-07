@@ -43,7 +43,7 @@ class DnsmosError(RuntimeError):
 
 
 class DnsmosConfig:
-    """Fixed local DNSMOS configuration used by the signal pipeline."""
+    """Fixed local DNSMOS configuration used by the tagging pipeline."""
 
     def __init__(
         self,

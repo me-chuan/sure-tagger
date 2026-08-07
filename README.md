@@ -1,7 +1,7 @@
 # sure-tagger
 
 ASR dataset sample-level tagging toolkit. The project currently focuses on
-acoustic, signal, sound-field, speaker, and language-content tags from raw-only
+acoustic, sound-field, speaker, and language-content tags from raw-only
 sample inputs.
 
 ## Repository Layout
@@ -43,16 +43,16 @@ Run tests:
 python3 -m unittest discover -s tests
 ```
 
-Run the sample-level signal pipeline on the bundled sample manifest:
+Run the sample-level tagging pipeline on the bundled sample manifest:
 
 ```bash
-python3 scripts/run_signal.py
+python3 scripts/run_tagger.py
 ```
 
 Run the full pipeline for one sample only:
 
 ```bash
-python3 scripts/run_signal.py \
+python3 scripts/run_tagger.py \
   --manifest phase2_asr_sample/manifest.jsonl \
   --output outputs/one_sample_tags.jsonl \
   --sample-id EN2001a_utterance_00000
@@ -61,7 +61,7 @@ python3 scripts/run_signal.py \
 Supplement selected tags into an existing tags-only output:
 
 ```bash
-python3 scripts/run_signal.py \
+python3 scripts/run_tagger.py \
   --manifest phase2_asr_sample/manifest.jsonl \
   --input-tags outputs/phase2_full_pipeline_tags.jsonl \
   --output outputs/phase2_topic_patch.jsonl \
@@ -81,7 +81,7 @@ python3 scripts/run_c50_method_comparison.py
 Run with MOSS diarization enabled for mixed/mono recordings:
 
 ```bash
-python3 scripts/run_signal.py \
+python3 scripts/run_tagger.py \
   --manifest phase1_asr_samples/manifest.jsonl \
   --output phase1_asr_samples/outputs/sample_tags.jsonl \
   --moss-diarize-enable \

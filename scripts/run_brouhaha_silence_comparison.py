@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tagger.input_schema import InputSchemaError, validate_input_record  # noqa: E402
-from tagger.pipelines.signal import resolve_audio_path  # noqa: E402
+from tagger.pipelines.tagging import resolve_audio_path  # noqa: E402
 from tagger.tools.acoustic_io import get_audio_info  # noqa: E402
 from tagger.tools.basic_acoustic.brouhaha_signal_estimator import BrouhahaConfig  # noqa: E402
 from tagger.tools.basic_acoustic.brouhaha_vad_silence_detector import (  # noqa: E402

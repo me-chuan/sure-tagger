@@ -73,6 +73,6 @@ print(result.evidence["winning_event"])
 PY
 ```
 
-The full signal pipeline enables both tools by default. Use
+The full tagging pipeline enables both tools by default. Use
 `--firered-aed-use-gpu` or `--panns-use-gpu` for GPU inference, and
 `--panns-threshold` to override the default PANNs threshold.

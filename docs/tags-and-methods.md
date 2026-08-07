@@ -1,6 +1,6 @@
-# Signal Pipeline 标签与打标方法
+# Tagging Pipeline 标签与打标方法
 
-本文档说明 `scripts/run_signal.py` 当前能够生成的公开标签、每个标签的
+本文档说明 `scripts/run_tagger.py` 当前能够生成的公开标签、每个标签的
 计算方法、音频预处理方式，以及输入和输出 JSON 示例。
 
 ## 1. 运行方式
@@ -8,7 +8,7 @@
 CPU 运行：
 
 ```bash
-python3 scripts/run_signal.py \
+python3 scripts/run_tagger.py \
   --manifest phase1_asr_samples/manifest.jsonl \
   --output phase1_asr_samples/outputs/full_pipeline_tags.jsonl
 ```
@@ -16,7 +16,7 @@ python3 scripts/run_signal.py \
 在当前部署环境中让 PANNs 和 Rec-RIR 使用 GPU 0：
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python3 scripts/run_signal.py \
+CUDA_VISIBLE_DEVICES=0 python3 scripts/run_tagger.py \
   --manifest phase1_asr_samples/manifest.jsonl \
   --output phase1_asr_samples/outputs/full_pipeline_tags.jsonl \
   --panns-use-gpu \
@@ -30,7 +30,7 @@ GPU 参数。
 可选启用 topic 标签：
 
 ```bash
-python3 scripts/run_signal.py \
+python3 scripts/run_tagger.py \
   --manifest phase1_asr_samples/manifest.jsonl \
   --output phase1_asr_samples/outputs/full_pipeline_tags.jsonl \
   --topic-enable \
@@ -50,7 +50,7 @@ OpenAI key 的优先级是：
 只跑某一个样本的完整链路：
 
 ```bash
-python3 scripts/run_signal.py \
+python3 scripts/run_tagger.py \
   --manifest phase2_asr_sample/manifest.jsonl \
   --output outputs/one_sample_tags.jsonl \
   --sample-id EN2001a_utterance_00000 \
@@ -60,7 +60,7 @@ python3 scripts/run_signal.py \
 基于已有 tags-only 输出补某个样本的指定标签：
 
 ```bash
-python3 scripts/run_signal.py \
+python3 scripts/run_tagger.py \
   --manifest phase2_asr_sample/manifest.jsonl \
   --input-tags outputs/phase2_full_pipeline_tags.jsonl \
   --output outputs/phase2_topic_patch.jsonl \
@@ -109,7 +109,7 @@ manifest 每行是一个封闭的 raw-only JSON 对象。例如：
 
 ## 3. 当前可打标签
 
-当前 signal pipeline 定义了 26 个公开字段。`sound_field_scene.far_field`
+当前 tagging pipeline 定义了 26 个公开字段。`sound_field_scene.far_field`
 仍是预留字段，暂时输出 `null`。`language_content.topic` 已接入可选的
 OpenAI Responses 实现，但默认关闭；未启用、配置缺失或调用失败时输出
 `null`。
@@ -285,7 +285,7 @@ warning 或推理证据。
 
 ## 6. 当前预留字段
 
-以下字段属于公开 schema，但尚未接入当前 signal pipeline 的已注册工具，
+以下字段属于公开 schema，但尚未接入当前 tagging pipeline 的已注册工具，
 因此目前输出 `null`：
 
 | Tag | 计划含义 |

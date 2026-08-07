@@ -35,7 +35,7 @@ class BrouhahaError(RuntimeError):
 
 
 class BrouhahaConfig:
-    """Fixed Brouhaha configuration used by the signal pipeline."""
+    """Fixed Brouhaha configuration used by the tagging pipeline."""
 
     def __init__(
         self,

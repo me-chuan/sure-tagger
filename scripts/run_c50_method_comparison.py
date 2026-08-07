@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tagger.input_schema import InputSchemaError, validate_input_record  # noqa: E402
-from tagger.pipelines.signal import (  # noqa: E402
+from tagger.pipelines.tagging import (  # noqa: E402
     resolve_audio_path,
     write_rir_artifact,
 )

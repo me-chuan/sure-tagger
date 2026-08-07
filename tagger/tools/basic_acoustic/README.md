@@ -50,7 +50,7 @@ was installed from the Tsinghua PyPI mirror:
 
 The model paths and subprocess interpreter are fixed in
 `tagger/local_config.py`. Standard DNSMOS is the pipeline default. Pass
-`--dnsmos-personalized` to `scripts/run_signal.py` to select the upstream
+`--dnsmos-personalized` to `scripts/run_tagger.py` to select the upstream
 personalized primary model; P.808 scoring is unchanged.
 
 Run a DNSMOS-only smoke test without invoking the other model tools:
