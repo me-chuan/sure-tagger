@@ -2,7 +2,7 @@ window.DEMO_DATA = {
   "summary": {
     "sampleCount": 40,
     "datasetCount": 8,
-    "selectedCount": 14,
+    "selectedCount": 15,
     "rirArtifactCount": 40,
     "datasets": [
       {
@@ -42,11 +42,20 @@ window.DEMO_DATA = {
       "basic_acoustic": 40,
       "sound_field_scene": 40,
       "language_content": 40,
-      "speaker": 0
+      "speaker": 3
     },
     "generatedFrom": {
       "manifest": "phase2_asr_sample/manifest.jsonl",
-      "tags": "outputs/phase2_full_pipeline_tags.jsonl"
+      "tags": "outputs/phase2_full_pipeline_tags.jsonl",
+      "smokeTags": "outputs/ami_en2001a_smoke_topic_vad_speaker.jsonl"
+    },
+    "smoke": {
+      "name": "AMI EN2001a topic/VAD/speaker smoke",
+      "sampleCount": 3,
+      "topicCount": 3,
+      "metadataVadCount": 3,
+      "metadataSpeakerCount": 3,
+      "output": "outputs/ami_en2001a_smoke_topic_vad_speaker.jsonl"
     }
   },
   "samples": [
@@ -74,7 +83,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.61,
-              "start_sec": 0.0
+              "start_sec": 0
             }
           ],
           "snr_db": -0.23553
@@ -130,7 +139,7 @@ window.DEMO_DATA = {
           "dnsmos_sig": 1.471661,
           "duration_sec": 7.631938,
           "sample_rate_hz": 16000,
-          "silence_ratio": 0.0,
+          "silence_ratio": 0,
           "silence_segments": [],
           "snr_db": -1.029779
         },
@@ -189,7 +198,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.65,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 8.119813,
@@ -255,7 +264,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.39,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 6.631687,
@@ -321,7 +330,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.42,
-              "start_sec": 0.0
+              "start_sec": 0
             }
           ],
           "snr_db": 1.25796
@@ -363,8 +372,8 @@ window.DEMO_DATA = {
       "row": 21,
       "sampleId": "EN2001a_utterance_00000",
       "dataset": "AMI",
-      "title": "Meeting speech: AMI",
-      "note": "Real meeting speech with fillers and conversational transcript structure.",
+      "title": "AMI smoke: coordination topic",
+      "note": "AMI smoke sample with OpenAI topic, metadata-derived silence intervals, and metadata speaker flags. Topic: meeting workflow / coordination.",
       "audio": "assets/audio/ami_EN2001a_utterance_00000.wav",
       "transcript": "'Kay. Gosh. Okay. 'Kay. Does anyone want to see uh Steve's feedback from the specification? Is there much more in it than he d I I dry-read it the last time.. Right. Is there much more in it than he said yesterday?",
       "nativeMetadata": {},
@@ -379,35 +388,31 @@ window.DEMO_DATA = {
           "dnsmos_sig": 3.089926,
           "duration_sec": 18.436,
           "sample_rate_hz": 16000,
-          "silence_ratio": 0.503688,
+          "silence_ratio": 0.424441,
           "silence_segments": [
             {
-              "end_sec": 2.89,
-              "start_sec": 0.0
+              "end_sec": 0.5,
+              "start_sec": 0
             },
             {
-              "end_sec": 7.82,
-              "start_sec": 3.75
+              "end_sec": 2.795,
+              "start_sec": 1.3
             },
             {
-              "end_sec": 8.41,
-              "start_sec": 8.36
+              "end_sec": 7.786,
+              "start_sec": 3.435
             },
             {
-              "end_sec": 12.06,
-              "start_sec": 11.49
+              "end_sec": 8.372,
+              "start_sec": 8.285
             },
             {
-              "end_sec": 14.25,
-              "start_sec": 13.04
-            },
-            {
-              "end_sec": 16.26,
-              "start_sec": 15.91
+              "end_sec": 14.068,
+              "start_sec": 12.964
             },
             {
               "end_sec": 18.436,
-              "start_sec": 18.29
+              "start_sec": 18.148
             }
           ],
           "snr_db": 13.128118
@@ -423,7 +428,7 @@ window.DEMO_DATA = {
             "has_repetition": true,
             "repetition_count": 1
           },
-          "topic": null,
+          "topic": "meeting_workflow/coordination",
           "word_count": 43
         },
         "sound_field_scene": {
@@ -437,9 +442,9 @@ window.DEMO_DATA = {
           "sound": []
         },
         "speaker": {
-          "multi_speaker": null,
-          "speaker_change": null,
-          "speaker_overlap": null
+          "multi_speaker": true,
+          "speaker_change": true,
+          "speaker_overlap": true
         }
       }
     },
@@ -447,8 +452,8 @@ window.DEMO_DATA = {
       "row": 22,
       "sampleId": "EN2001a_utterance_00001",
       "dataset": "AMI",
-      "title": "Meeting speech: clicking",
-      "note": "Real meeting speech where PANNs detects Clicking in the background.",
+      "title": "AMI smoke: project planning topic",
+      "note": "AMI smoke sample showing project-management topic classification plus metadata VAD and multi-speaker overlap flags.",
       "audio": "assets/audio/ami_EN2001a_utterance_00001.wav",
       "transcript": "Not really, um just what he's talking about, like duplication of effort and Mm. Hmm. Hmm? Like duplication of effort and stuff, and um yeah, he was saying that we should maybe uh think about having a prototype for week six, which is next week. Yeah. Next week.",
       "nativeMetadata": {},
@@ -463,47 +468,19 @@ window.DEMO_DATA = {
           "dnsmos_sig": 3.251212,
           "duration_sec": 20.084,
           "sample_rate_hz": 16000,
-          "silence_ratio": 0.294463,
+          "silence_ratio": 0.093856,
           "silence_segments": [
             {
-              "end_sec": 0.3,
-              "start_sec": 0.0
+              "end_sec": 0.288,
+              "start_sec": 0
             },
             {
-              "end_sec": 2.05,
-              "start_sec": 1.88
-            },
-            {
-              "end_sec": 6.96,
-              "start_sec": 4.82
-            },
-            {
-              "end_sec": 10.88,
-              "start_sec": 9.7
-            },
-            {
-              "end_sec": 11.74,
-              "start_sec": 11.68
-            },
-            {
-              "end_sec": 13.4,
-              "start_sec": 13.28
-            },
-            {
-              "end_sec": 15.66,
-              "start_sec": 15.4
-            },
-            {
-              "end_sec": 17.42,
-              "start_sec": 16.74
-            },
-            {
-              "end_sec": 18.51,
-              "start_sec": 18.46
+              "end_sec": 6.929,
+              "start_sec": 6.368
             },
             {
               "end_sec": 20.084,
-              "start_sec": 19.13
+              "start_sec": 19.048
             }
           ],
           "snr_db": 19.056463
@@ -519,7 +496,7 @@ window.DEMO_DATA = {
             "has_repetition": true,
             "repetition_count": 1
           },
-          "topic": null,
+          "topic": "business_management/project_management",
           "word_count": 48
         },
         "sound_field_scene": {
@@ -535,9 +512,67 @@ window.DEMO_DATA = {
           ]
         },
         "speaker": {
-          "multi_speaker": null,
-          "speaker_change": null,
-          "speaker_overlap": null
+          "multi_speaker": true,
+          "speaker_change": true,
+          "speaker_overlap": true
+        }
+      }
+    },
+    {
+      "row": 23,
+      "sampleId": "EN2001a_utterance_00002",
+      "dataset": "AMI",
+      "title": "AMI smoke: software planning topic",
+      "note": "New AMI smoke sample: a longer software-planning discussion with topic, metadata VAD, and multi-speaker labels generated in the latest run.",
+      "audio": "assets/audio/ami_EN2001a_utterance_00002.wav",
+      "transcript": "So we should probably prioritize our packages. Yeah, now I'd say if for the prototype if we just like wherever possible p chunk in the stuff that we have um pre-annotated and stuff, and for the stuff that we don't have pre-annotated write like a stupid baseline, then we should probably be able to basically that means we focus on on the interface first sort of, so that we we take the the ready-made parts and just see how we get them work together in the interface the way we want and and then we have a working prototype. And then we can go back and replace pieces either by our own components or by more sophisticated compo po components of our own. So it's probably feasible. The thing is I'm away this weekend. So that's for me Mm. Yeah. Yeah. Yeah, I mean if we just want to have um some data for the user face, could even be random data. Uh mm mm Oh yeah, um yeah. No. But also I might like the the similarity thing, like my just my matrix itself for my stuff, I c I I think I can do that fairly quickly because I have the algorithms. Yeah, I think today's meeting is really the one where we where we sort of settle down the data structure and as soon as we have that, uh probably like after today's meeting, we then actually need to Yeah. Yeah, I'm Yeah.",
+      "nativeMetadata": {
+        "source": "ami_en2001a_utterances/sample.native_metadata.utterances"
+      },
+      "durationSec": 72.5885,
+      "tags": {
+        "basic_acoustic": {
+          "c50": null,
+          "channels": 1,
+          "dnsmos_bak": null,
+          "dnsmos_ovrl": null,
+          "dnsmos_p808": null,
+          "dnsmos_sig": null,
+          "duration_sec": 72.5885,
+          "sample_rate_hz": 16000,
+          "silence_ratio": 0.025286,
+          "silence_segments": [
+            {
+              "end_sec": 1.036,
+              "start_sec": 0
+            },
+            {
+              "end_sec": 72.5885,
+              "start_sec": 71.789
+            }
+          ],
+          "snr_db": null
+        },
+        "language_content": {
+          "filler": null,
+          "language": null,
+          "punctuation": null,
+          "repetition": null,
+          "topic": "technology_engineering/software_engineering",
+          "word_count": null
+        },
+        "sound_field_scene": {
+          "audio_events": null,
+          "c50": null,
+          "far_field": null,
+          "music": null,
+          "rt60": null,
+          "sound": null
+        },
+        "speaker": {
+          "multi_speaker": true,
+          "speaker_change": true,
+          "speaker_overlap": true
         }
       }
     },
@@ -565,7 +600,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.8,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 4.19,
@@ -645,7 +680,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 7.01,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 7.8,
@@ -725,7 +760,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.3,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 2.38,
@@ -835,7 +870,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.5,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 10.435,
@@ -900,7 +935,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.41,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 4.203938,
@@ -964,7 +999,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.55,
-              "start_sec": 0.0
+              "start_sec": 0
             }
           ],
           "snr_db": 50.160365
@@ -1009,7 +1044,7 @@ window.DEMO_DATA = {
       "audio": "assets/audio/tut2018_street_traffic-barcelona-161-4901-a.wav",
       "transcript": "",
       "nativeMetadata": {},
-      "durationSec": 10.0,
+      "durationSec": 10,
       "tags": {
         "basic_acoustic": {
           "c50": 19.665466,
@@ -1018,13 +1053,13 @@ window.DEMO_DATA = {
           "dnsmos_ovrl": null,
           "dnsmos_p808": 2.286138,
           "dnsmos_sig": 1.381033,
-          "duration_sec": 10.0,
+          "duration_sec": 10,
           "sample_rate_hz": 16000,
-          "silence_ratio": 1.0,
+          "silence_ratio": 1,
           "silence_segments": [
             {
-              "end_sec": 10.0,
-              "start_sec": 0.0
+              "end_sec": 10,
+              "start_sec": 0
             }
           ],
           "snr_db": -4.8527

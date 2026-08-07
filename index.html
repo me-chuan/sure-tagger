@@ -12,7 +12,7 @@
         <p class="eyebrow">Sure Tagger / Phase 2</p>
         <h1>ASR 数据集二次打标展示</h1>
         <p class="lead">
-          将现有 ASR manifest、音频和 transcript 转换为统一标签：声学质量、声场场景、语言内容和后续说话人信息。
+          将 ASR manifest、音频、transcript 和原始 metadata 转换为统一标签：声学质量、声场场景、语言内容 topic、静音片段和多说话人信息。
         </p>
       </div>
       <nav class="topnav" aria-label="页面导航">
@@ -26,7 +26,7 @@
       <section class="summary-band" aria-labelledby="summary-title">
         <div class="section-heading">
           <p class="eyebrow">Current run</p>
-          <h2 id="summary-title">Phase 2 全链路结果</h2>
+          <h2 id="summary-title">Phase 2 全链路 + AMI smoke 结果</h2>
         </div>
         <div class="metric-grid" id="metricGrid"></div>
       </section>
@@ -45,17 +45,17 @@
           <article class="pipeline-step">
             <span class="step-index">02</span>
             <h3>Language Layer</h3>
-            <p>对 transcript 做确定性语言、词数、填充词、重复和标点标签。</p>
+            <p>对 transcript 做确定性语言标签，并用 OpenAI Responses 生成层级 topic。</p>
           </article>
           <article class="pipeline-step">
             <span class="step-index">03</span>
             <h3>Acoustic + Scene</h3>
-            <p>提取时长、SNR、静音、DNSMOS、RT60、C50、音频事件等信息。</p>
+            <p>提取时长、SNR、DNSMOS、RT60、C50、音频事件；AMI smoke 中静音片段优先来自 metadata。</p>
           </article>
           <article class="pipeline-step">
             <span class="step-index">04</span>
             <h3>Unified Tags</h3>
-            <p>输出按 tag group 组织的 JSON，topic/context 和 speaker 可继续扩展。</p>
+            <p>输出按 tag group 组织的 JSON，speaker 标签优先使用 utterance metadata，缺失时再退回模型。</p>
           </article>
         </div>
       </section>
@@ -125,8 +125,8 @@
     </main>
 
     <footer class="footer">
-      <span>Demo data: phase2 manifest + full pipeline tags</span>
-      <span>Speaker/MOSS diarize 环境预留，本页展示当前已落地链路。</span>
+      <span>Demo data: phase2 full pipeline tags + AMI EN2001a topic/VAD/speaker smoke</span>
+      <span>AMI speaker/VAD 展示 metadata-first 路径，MOSS diarize 仍可作为缺失 metadata 时的退化路径。</span>
     </footer>
 
     <script src="data.js"></script>
