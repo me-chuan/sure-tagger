@@ -23,6 +23,7 @@ from tagger.tools.basic_acoustic.registry import (
     BROUHAHA_ACOUSTIC_TOOL,
     DNSMOS_QUALITY_TOOL,
     FIRERED_VAD_SILENCE_TOOL,
+    NATIVE_METADATA_VAD_TOOL,
     SILENCE_RATIO_TOOL,
 )
 from tagger.tools.sound_field_scene.registry import (
@@ -54,9 +55,14 @@ from tagger.tools.speaker.metrics import (
 from tagger.tools.speaker.registry import (
     CHANNEL_ACTIVITY_TOOL,
     MOSS_DIARIZE_TOOL,
+    NATIVE_METADATA_DIARIZE_TOOL,
     SPEAKER_METRICS_TOOL,
 )
-from tagger.tools.language_content.registry import DETERMINISTIC_LANGUAGE_CONTENT_TOOL
+from tagger.tools.language_content.registry import (
+    DETERMINISTIC_LANGUAGE_CONTENT_TOOL,
+    TOPIC_LANGUAGE_CONTENT_TOOL,
+)
+from tagger.tools.language_content.topic import TopicConfig
 
 
 BASIC_ACOUSTIC_FIELDS = {
@@ -97,6 +103,87 @@ LANGUAGE_CONTENT_FIELDS = {
     "filler": None,
 }
 
+STAGE_LANGUAGE_DETERMINISTIC = "language_deterministic"
+STAGE_TOPIC = "topic"
+STAGE_AUDIO_PROBE = "audio_probe"
+STAGE_SILENCE = "silence"
+STAGE_SPEAKER = "speaker"
+STAGE_BROUHAHA = "brouhaha"
+STAGE_DNSMOS = "dnsmos"
+STAGE_FIRERED_AED = "firered_aed"
+STAGE_PANNS = "panns"
+STAGE_RECRIR = "recrir"
+
+FULL_STAGES = [
+    STAGE_LANGUAGE_DETERMINISTIC,
+    STAGE_TOPIC,
+    STAGE_AUDIO_PROBE,
+    STAGE_SILENCE,
+    STAGE_SPEAKER,
+    STAGE_BROUHAHA,
+    STAGE_DNSMOS,
+    STAGE_FIRERED_AED,
+    STAGE_PANNS,
+    STAGE_RECRIR,
+]
+
+AUDIO_STAGES = set(
+    [
+        STAGE_AUDIO_PROBE,
+        STAGE_SILENCE,
+        STAGE_SPEAKER,
+        STAGE_BROUHAHA,
+        STAGE_DNSMOS,
+        STAGE_FIRERED_AED,
+        STAGE_PANNS,
+        STAGE_RECRIR,
+    ]
+)
+
+STAGE_TAG_PATHS = {
+    STAGE_LANGUAGE_DETERMINISTIC: [
+        "language_content.language",
+        "language_content.word_count",
+        "language_content.punctuation",
+        "language_content.repetition",
+        "language_content.filler",
+    ],
+    STAGE_TOPIC: ["language_content.topic"],
+    STAGE_AUDIO_PROBE: [
+        "basic_acoustic.duration_sec",
+        "basic_acoustic.sample_rate_hz",
+        "basic_acoustic.channels",
+    ],
+    STAGE_SILENCE: [
+        "basic_acoustic.silence_segments",
+        "basic_acoustic.silence_ratio",
+    ],
+    STAGE_SPEAKER: [
+        "speaker.multi_speaker",
+        "speaker.speaker_change",
+        "speaker.speaker_overlap",
+    ],
+    STAGE_BROUHAHA: ["basic_acoustic.snr_db", "basic_acoustic.c50"],
+    STAGE_DNSMOS: [
+        "basic_acoustic.dnsmos_sig",
+        "basic_acoustic.dnsmos_bak",
+        "basic_acoustic.dnsmos_ovrl",
+        "basic_acoustic.dnsmos_p808",
+    ],
+    STAGE_FIRERED_AED: [
+        "sound_field_scene.audio_events",
+        "sound_field_scene.music",
+    ],
+    STAGE_PANNS: ["sound_field_scene.sound"],
+    STAGE_RECRIR: ["sound_field_scene.rt60", "sound_field_scene.c50"],
+}
+
+IMPLEMENTED_TAG_PATHS = set(
+    path
+    for tag_paths in STAGE_TAG_PATHS.values()
+    for path in tag_paths
+)
+
 def run_manifest(
     manifest_path,
     output_path,
@@ -110,14 +197,26 @@ def run_manifest(
     dnsmos_config=None,
     firered_aed_config=None,
     panns_config=None,
+    topic_config=None,
+    topic_client=None,
+    sample_ids=None,
+    existing_tags_path=None,
+    selected_tag_paths=None,
+    missing_only=False,
 ):
-    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerLayerConfig], Any, Any, Optional[Union[str, Path]], Optional[DnsmosConfig], Optional[FireRedAedConfig], Optional[PannsBackgroundConfig]) -> Dict[str, Any]
+    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerLayerConfig], Any, Any, Optional[Union[str, Path]], Optional[DnsmosConfig], Optional[FireRedAedConfig], Optional[PannsBackgroundConfig], Optional[TopicConfig], Any, Optional[List[str]], Optional[Union[str, Path]], Optional[List[str]], bool) -> Dict[str, Any]
     manifest = Path(manifest_path)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     artifact_root = _resolve_artifact_root(output, artifact_dir)
+    selected_sample_ids = set(str(item) for item in (sample_ids or []))
+    existing_tags = (
+        _load_existing_tags(existing_tags_path) if existing_tags_path is not None else None
+    )
+    requested_tag_paths = _normalize_selected_tag_paths(selected_tag_paths)
 
     count = 0
+    processed_count = 0
     internal_warning_count = 0
     tool_context = {}  # type: Dict[str, Any]
     try:
@@ -128,6 +227,26 @@ def run_manifest(
                 if not line.strip():
                     continue
                 record = json.loads(line)
+                sample_id = str(record.get("sample", {}).get("sample_id", ""))
+                selected = not selected_sample_ids or sample_id in selected_sample_ids
+                base_tags = (
+                    _tags_from_existing_row(existing_tags, row_index)
+                    if existing_tags is not None
+                    else None
+                )
+                if not selected:
+                    if base_tags is not None:
+                        sink.write(
+                            json.dumps(base_tags, ensure_ascii=False, sort_keys=True)
+                            + "\n"
+                        )
+                        count += 1
+                    continue
+                row_tag_paths = requested_tag_paths
+                if base_tags is not None and row_tag_paths is None:
+                    row_tag_paths = _missing_tag_paths(base_tags)
+                if base_tags is not None and missing_only and row_tag_paths is not None:
+                    row_tag_paths = _filter_missing_tag_paths(base_tags, row_tag_paths)
                 try:
                     internal = _tag_record_internal(
                         record,
@@ -144,6 +263,10 @@ def run_manifest(
                         dnsmos_config=dnsmos_config,
                         firered_aed_config=firered_aed_config,
                         panns_config=panns_config,
+                        topic_config=topic_config,
+                        topic_client=topic_client,
+                        initial_tags=base_tags,
+                        selected_tag_paths=row_tag_paths,
                     )
                 except InputSchemaError as exc:
                     raise InputSchemaError("line %s: %s" % (row_index, exc))
@@ -153,6 +276,7 @@ def run_manifest(
                     + "\n"
                 )
                 count += 1
+                processed_count += 1
     finally:
         close_subprocess_workers(tool_context)
 
@@ -161,6 +285,7 @@ def run_manifest(
         "output_path": str(output),
         "artifact_dir": str(artifact_root),
         "sample_count": count,
+        "processed_sample_count": processed_count,
         "internal_warning_count": internal_warning_count,
     }
 
@@ -182,8 +307,12 @@ def tag_record(
     firered_aed_client=None,
     panns_config=None,
     panns_client=None,
+    topic_config=None,
+    topic_client=None,
+    initial_tags=None,
+    selected_tag_paths=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerLayerConfig], Any, Any, Any, Any, Optional[Union[str, Path]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[PannsBackgroundConfig], Any) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerLayerConfig], Any, Any, Any, Any, Optional[Union[str, Path]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[PannsBackgroundConfig], Any, Optional[TopicConfig], Any, Optional[Dict[str, Any]], Optional[List[str]]) -> Dict[str, Any]
     return _tag_record_internal(
         record,
         manifest_dir,
@@ -201,6 +330,10 @@ def tag_record(
         firered_aed_client=firered_aed_client,
         panns_config=panns_config,
         panns_client=panns_client,
+        topic_config=topic_config,
+        topic_client=topic_client,
+        initial_tags=initial_tags,
+        selected_tag_paths=selected_tag_paths,
     )["tags"]
 
 
@@ -223,20 +356,38 @@ def _tag_record_internal(
     firered_aed_client=None,
     panns_config=None,
     panns_client=None,
+    topic_config=None,
+    topic_client=None,
+    initial_tags=None,
+    selected_tag_paths=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerLayerConfig], Any, Any, Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[PannsBackgroundConfig], Any) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerLayerConfig], Any, Any, Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[PannsBackgroundConfig], Any, Optional[TopicConfig], Any, Optional[Dict[str, Any]], Optional[List[str]]) -> Dict[str, Any]
     validate_input_record(record)
     sample = record["sample"]
     sample_id = sample["sample_id"]
     audio_path = resolve_audio_path(sample, manifest_dir)
 
-    tags = empty_tags()
+    tags = _merge_tags(initial_tags)
     internal_results = []  # type: List[Dict[str, Any]]
     warnings = []  # type: List[Dict[str, Any]]
+    stages = _stages_for_tag_paths(selected_tag_paths, tags)
 
-    _run_language_content_tools(sample, tags, internal_results, warnings, sample_id)
+    if STAGE_LANGUAGE_DETERMINISTIC in stages or STAGE_TOPIC in stages:
+        _run_language_content_tools(
+            record,
+            tags,
+            internal_results,
+            warnings,
+            sample_id,
+            topic_config=topic_config,
+            topic_client=topic_client,
+            stages=stages,
+        )
 
-    if audio_path is None:
+    needs_audio = bool(stages & AUDIO_STAGES)
+    if not needs_audio:
+        pass
+    elif audio_path is None:
         warnings.append(
             {
                 "type": "missing_audio_path",
@@ -255,88 +406,97 @@ def _tag_record_internal(
         )
     else:
         tool_context = tool_context if tool_context is not None else {}
-        _run_signal_probe(
-            audio_path,
-            tool_context,
-            tags,
-            internal_results,
-            warnings,
-            sample_id,
-        )
-        _run_silence_tools(
-            audio_path,
-            tool_context,
-            tags,
-            internal_results,
-            warnings,
-            sample_id,
-            firered_vad_config=firered_vad_config,
-        )
-        _run_speaker_tools(
-            audio_path,
-            sample,
-            tool_context,
-            tags,
-            internal_results,
-            warnings,
-            sample_id,
-            speaker_config=speaker_config,
-            moss_client=moss_client,
-            channel_activity_client=channel_activity_client,
-            artifact_dir=artifact_dir,
-            artifact_record_index=artifact_record_index,
-        )
-        _run_brouhaha_tool(
-            audio_path,
-            tool_context,
-            tags,
-            internal_results,
-            warnings,
-            sample_id,
-            brouhaha_config=brouhaha_config,
-        )
-        _run_dnsmos_tool(
-            audio_path,
-            tool_context,
-            tags,
-            internal_results,
-            warnings,
-            sample_id,
-            dnsmos_config=dnsmos_config,
-            dnsmos_client=dnsmos_client,
-        )
-        _run_firered_aed_tool(
-            audio_path,
-            tool_context,
-            tags,
-            internal_results,
-            warnings,
-            sample_id,
-            firered_aed_config=firered_aed_config,
-            firered_aed_client=firered_aed_client,
-        )
-        _run_panns_background_tool(
-            audio_path,
-            tool_context,
-            tags,
-            internal_results,
-            warnings,
-            sample_id,
-            panns_config=panns_config,
-            panns_client=panns_client,
-        )
-        _run_recrir_tools(
-            audio_path,
-            tool_context,
-            tags,
-            internal_results,
-            warnings,
-            sample_id,
-            recrir_config=recrir_config,
-            recrir_client=recrir_client,
-            artifact_dir=artifact_dir,
-            artifact_record_index=artifact_record_index,
-        )
+        if _needs_audio_probe(stages, tags):
+            _run_signal_probe(
+                audio_path,
+                tool_context,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+            )
+        if STAGE_SILENCE in stages:
+            _run_silence_tools(
+                audio_path,
+                sample,
+                tool_context,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                firered_vad_config=firered_vad_config,
+            )
+        if STAGE_SPEAKER in stages:
+            _run_speaker_tools(
+                audio_path,
+                sample,
+                tool_context,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                speaker_config=speaker_config,
+                moss_client=moss_client,
+                channel_activity_client=channel_activity_client,
+                artifact_dir=artifact_dir,
+                artifact_record_index=artifact_record_index,
+            )
+        if STAGE_BROUHAHA in stages:
+            _run_brouhaha_tool(
+                audio_path,
+                tool_context,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                brouhaha_config=brouhaha_config,
+            )
+        if STAGE_DNSMOS in stages:
+            _run_dnsmos_tool(
+                audio_path,
+                tool_context,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                dnsmos_config=dnsmos_config,
+                dnsmos_client=dnsmos_client,
+            )
+        if STAGE_FIRERED_AED in stages:
+            _run_firered_aed_tool(
+                audio_path,
+                tool_context,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                firered_aed_config=firered_aed_config,
+                firered_aed_client=firered_aed_client,
+            )
+        if STAGE_PANNS in stages:
+            _run_panns_background_tool(
+                audio_path,
+                tool_context,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                panns_config=panns_config,
+                panns_client=panns_client,
+            )
+        if STAGE_RECRIR in stages:
+            _run_recrir_tools(
+                audio_path,
+                tool_context,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                recrir_config=recrir_config,
+                recrir_client=recrir_client,
+                artifact_dir=artifact_dir,
+                artifact_record_index=artifact_record_index,
+            )
 
     warnings.extend(
         compare_native_metadata_basic_acoustic_fields(sample, tags["basic_acoustic"])
@@ -367,6 +527,145 @@ def empty_tags():
         "speaker": dict(SPEAKER_FIELDS),
         "language_content": dict(LANGUAGE_CONTENT_FIELDS),
     }
+
+
+def _merge_tags(initial_tags=None):
+    # type: (Optional[Dict[str, Any]]) -> Dict[str, Any]
+    tags = empty_tags()
+    if not isinstance(initial_tags, dict):
+        return tags
+    for group, fields in tags.items():
+        incoming = initial_tags.get(group)
+        if not isinstance(incoming, dict):
+            continue
+        for field in fields:
+            if field in incoming:
+                tags[group][field] = incoming[field]
+    return tags
+
+
+def _load_existing_tags(path):
+    # type: (Union[str, Path]) -> List[Dict[str, Any]]
+    rows = []
+    with Path(path).open("r", encoding="utf-8") as source:
+        for index, line in enumerate(source, start=1):
+            if not line.strip():
+                continue
+            try:
+                rows.append(_merge_tags(json.loads(line)))
+            except ValueError as exc:
+                raise ValueError("existing tags line %s is invalid JSON" % index) from exc
+    return rows
+
+
+def _tags_from_existing_row(existing_tags, row_index):
+    # type: (Optional[List[Dict[str, Any]]], int) -> Optional[Dict[str, Any]]
+    if existing_tags is None:
+        return None
+    if row_index > len(existing_tags):
+        raise ValueError("existing tags has no row %s" % row_index)
+    return _merge_tags(existing_tags[row_index - 1])
+
+
+def _normalize_selected_tag_paths(selected_tag_paths):
+    # type: (Optional[List[str]]) -> Optional[List[str]]
+    if selected_tag_paths is None:
+        return None
+    values = []
+    for item in selected_tag_paths:
+        for part in str(item).split(","):
+            value = part.strip()
+            if value:
+                values.append(value)
+    return values
+
+
+def _missing_tag_paths(tags):
+    # type: (Dict[str, Any]) -> List[str]
+    paths = []
+    for group, fields in _merge_tags(tags).items():
+        for field, value in fields.items():
+            path = "%s.%s" % (group, field)
+            if value is None and path in IMPLEMENTED_TAG_PATHS:
+                paths.append(path)
+    return paths
+
+
+def _filter_missing_tag_paths(tags, tag_paths):
+    # type: (Dict[str, Any], List[str]) -> List[str]
+    result = []
+    for path in tag_paths:
+        value = _tag_value(tags, path)
+        if value is None:
+            result.append(path)
+    return result
+
+
+def _tag_value(tags, tag_path):
+    # type: (Dict[str, Any], str) -> Any
+    if "." not in tag_path:
+        return None
+    group, field = tag_path.split(".", 1)
+    value = tags.get(group, {})
+    if not isinstance(value, dict):
+        return None
+    return value.get(field)
+
+
+def _stages_for_tag_paths(selected_tag_paths, tags=None):
+    # type: (Optional[List[str]], Optional[Dict[str, Any]]) -> set
+    if selected_tag_paths is None:
+        return set(FULL_STAGES)
+    stages = set()
+    for value in _normalize_selected_tag_paths(selected_tag_paths) or []:
+        if value in ("all", "*"):
+            return set(FULL_STAGES)
+        if value in STAGE_TAG_PATHS:
+            stages.add(value)
+            continue
+        if value in ("basic_acoustic", "sound_field_scene", "speaker", "language_content"):
+            stages.update(_stages_for_group(value))
+            continue
+        matched = False
+        for stage, tag_paths in STAGE_TAG_PATHS.items():
+            if value in tag_paths:
+                stages.add(stage)
+                matched = True
+        if not matched:
+            raise ValueError("unknown tag path or stage: %s" % value)
+    _add_dependency_stages(stages, tags or empty_tags())
+    return stages
+
+
+def _stages_for_group(group):
+    stages = set()
+    for stage, tag_paths in STAGE_TAG_PATHS.items():
+        if any(path.startswith(group + ".") for path in tag_paths):
+            stages.add(stage)
+    return stages
+
+
+def _add_dependency_stages(stages, tags):
+    if any(stage in stages for stage in AUDIO_STAGES - set([STAGE_AUDIO_PROBE])):
+        if _needs_audio_probe(stages, tags):
+            stages.add(STAGE_AUDIO_PROBE)
+
+
+def _needs_audio_probe(stages, tags):
+    # type: (set, Dict[str, Any]) -> bool
+    if STAGE_AUDIO_PROBE in stages:
+        return True
+    if not stages & AUDIO_STAGES:
+        return False
+    basic = tags.get("basic_acoustic", {})
+    if STAGE_SPEAKER in stages:
+        return (
+            basic.get("duration_sec") is None
+            or basic.get("channels") is None
+        )
+    if STAGE_SILENCE in stages or STAGE_FIRERED_AED in stages:
+        return basic.get("duration_sec") is None
+    return False
 
 
 def resolve_audio_path(sample, manifest_dir):
@@ -424,6 +723,7 @@ def _run_signal_probe(
 
 def _run_silence_tools(
     audio_path,
+    sample,
     tool_context,
     tags,
     internal_results,
@@ -445,27 +745,39 @@ def _run_silence_tools(
         tags["basic_acoustic"]["silence_ratio"] = None
         return
 
+    metadata_result = None
     try:
-        silence_result = FIRERED_VAD_SILENCE_TOOL["run"](
-            audio_path,
+        metadata_result = NATIVE_METADATA_VAD_TOOL["run"](
+            sample,
             duration_sec=duration_sec,
             context=tool_context,
-            config=firered_vad_config,
         )
-        apply_result(tags, internal_results, silence_result)
-    except Exception as exc:  # noqa: BLE001 - no non-FireRed fallback is allowed.
-        warnings.append(
-            {
-                "type": "firered_vad_error",
-                "message": str(exc),
-                "sample_id": sample_id,
-                "audio_path": str(audio_path),
-                "tool_name": FIRERED_VAD_SILENCE_TOOL["tool_name"],
-            }
-        )
-        tags["basic_acoustic"]["silence_segments"] = None
-        tags["basic_acoustic"]["silence_ratio"] = None
-        return
+        apply_result(tags, internal_results, metadata_result)
+    except Exception:
+        metadata_result = None
+
+    if metadata_result is None:
+        try:
+            silence_result = FIRERED_VAD_SILENCE_TOOL["run"](
+                audio_path,
+                duration_sec=duration_sec,
+                context=tool_context,
+                config=firered_vad_config,
+            )
+            apply_result(tags, internal_results, silence_result)
+        except Exception as exc:  # noqa: BLE001 - no non-FireRed fallback is allowed.
+            warnings.append(
+                {
+                    "type": "firered_vad_error",
+                    "message": str(exc),
+                    "sample_id": sample_id,
+                    "audio_path": str(audio_path),
+                    "tool_name": FIRERED_VAD_SILENCE_TOOL["tool_name"],
+                }
+            )
+            tags["basic_acoustic"]["silence_segments"] = None
+            tags["basic_acoustic"]["silence_ratio"] = None
+            return
 
     try:
         ratio_result = SILENCE_RATIO_TOOL["run"](
@@ -487,23 +799,66 @@ def _run_silence_tools(
         tags["basic_acoustic"]["silence_ratio"] = None
 
 
-def _run_language_content_tools(sample, tags, internal_results, warnings, sample_id):
-    # type: (Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], str) -> None
+def _run_language_content_tools(
+    record,
+    tags,
+    internal_results,
+    warnings,
+    sample_id,
+    topic_config=None,
+    topic_client=None,
+    stages=None,
+):
+    # type: (Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], str, Optional[TopicConfig], Any, Optional[set]) -> None
+    stages = stages or set([STAGE_LANGUAGE_DETERMINISTIC, STAGE_TOPIC])
+    sample = record["sample"]
     transcript = sample.get("text", {}).get("transcript", "")
+    if STAGE_LANGUAGE_DETERMINISTIC in stages:
+        try:
+            for result in DETERMINISTIC_LANGUAGE_CONTENT_TOOL["run"](transcript):
+                apply_result(tags, internal_results, result)
+        except Exception as exc:  # noqa: BLE001 - tool failures become internal warnings.
+            warnings.append(
+                {
+                    "type": "language_content_tool_error",
+                    "message": str(exc),
+                    "sample_id": sample_id,
+                    "tool_name": DETERMINISTIC_LANGUAGE_CONTENT_TOOL["tool_name"],
+                }
+            )
+            for field in ("language", "word_count", "punctuation", "repetition", "filler"):
+                tags["language_content"][field] = None
+
+    config = topic_config or TopicConfig()
+    if STAGE_TOPIC not in stages or not config.enabled:
+        return
     try:
-        for result in DETERMINISTIC_LANGUAGE_CONTENT_TOOL["run"](transcript):
-            apply_result(tags, internal_results, result)
-    except Exception as exc:  # noqa: BLE001 - tool failures become internal warnings.
+        result = TOPIC_LANGUAGE_CONTENT_TOOL["run"](
+            record,
+            context={},
+            config=config,
+            client=topic_client,
+        )
+        apply_result(tags, internal_results, result)
+        if result.status == "failed":
+            warnings.append(
+                {
+                    "type": "topic_tool_failed",
+                    "message": result.evidence.get("error", "topic tool failed"),
+                    "sample_id": sample_id,
+                    "tool_name": TOPIC_LANGUAGE_CONTENT_TOOL["tool_name"],
+                }
+            )
+    except Exception as exc:  # noqa: BLE001 - topic failures become internal warnings.
         warnings.append(
             {
-                "type": "language_content_tool_error",
+                "type": "topic_tool_error",
                 "message": str(exc),
                 "sample_id": sample_id,
-                "tool_name": DETERMINISTIC_LANGUAGE_CONTENT_TOOL["tool_name"],
+                "tool_name": TOPIC_LANGUAGE_CONTENT_TOOL["tool_name"],
             }
         )
-        for field in ("language", "word_count", "punctuation", "repetition", "filler"):
-            tags["language_content"][field] = None
+        tags["language_content"]["topic"] = None
 
 
 def _run_speaker_tools(
@@ -544,6 +899,34 @@ def _run_speaker_tools(
         merge_same_speaker_gap_sec=config.channel_activity_config.merge_gap_sec,
         min_speech_duration_sec=config.channel_activity_config.min_segment_duration_sec,
     )
+    try:
+        _run_native_metadata_speaker_route(
+            sample,
+            tags,
+            internal_results,
+            warnings,
+            sample_id,
+            duration_sec,
+            metrics_config,
+            recording_id,
+            input_kind,
+            target_units,
+            artifact_dir,
+            artifact_record_index,
+        )
+        return
+    except Exception as exc:  # noqa: BLE001 - invalid metadata falls back to models.
+        if _has_native_speaker_segment_metadata(sample):
+            warnings.append(
+                {
+                    "type": "native_metadata_speaker_error",
+                    "message": str(exc),
+                    "sample_id": sample_id,
+                    "audio_path": str(audio_path),
+                    "tool_name": NATIVE_METADATA_DIARIZE_TOOL["tool_name"],
+                }
+            )
+
     separated_channel_input = (
         channels is not None
         and channels > 1
@@ -710,6 +1093,51 @@ def _run_speaker_tools(
             }
         )
     _null_speaker_tags(tags)
+
+
+def _run_native_metadata_speaker_route(
+    sample,
+    tags,
+    internal_results,
+    warnings,
+    sample_id,
+    duration_sec,
+    metrics_config,
+    recording_id,
+    input_kind,
+    target_units,
+    artifact_dir,
+    artifact_record_index,
+):
+    native_result = NATIVE_METADATA_DIARIZE_TOOL["run"](
+        sample,
+        duration_sec=duration_sec,
+        config=metrics_config,
+    )
+    internal_results.append(native_result.to_record())
+    source_key = native_result.value.get("source_key")
+    if source_key == "utterances" and not _has_explicit_target_units(sample):
+        target_units = []
+    metadata = build_metadata_from_timeline(
+        native_result.value.get("segments", []),
+        duration_sec,
+        sample_id,
+        recording_id=recording_id,
+        input_kind=input_kind,
+        primary_route="native_metadata_segments",
+        target_units=target_units,
+        config=metrics_config,
+    )
+    _write_speaker_metadata_artifact(
+        metadata,
+        internal_results,
+        warnings,
+        artifact_dir,
+        sample_id,
+        artifact_record_index,
+    )
+    for result in SPEAKER_METRICS_TOOL["run"](metadata):
+        apply_result(tags, internal_results, result)
 
 
 def _run_channel_activity_speaker_route(
@@ -919,6 +1347,22 @@ def _speaker_target_units_from_native_metadata(sample):
             }
         ]
     return []
+
+
+def _has_explicit_target_units(sample):
+    native_metadata = sample.get("native_metadata", {})
+    return isinstance(native_metadata.get("target_units"), list)
+
+
+def _has_native_speaker_segment_metadata(sample):
+    native_metadata = sample.get("native_metadata", {})
+    if not isinstance(native_metadata, dict):
+        return False
+    for key in ("speaker_segments", "diarization_segments", "segments", "utterances"):
+        value = native_metadata.get(key)
+        if isinstance(value, list) and value:
+            return True
+    return False
 
 
 def _metadata_float(value):
@@ -1679,6 +2123,37 @@ def build_arg_parser():
         help="Output tags-only JSONL path for sample tags.",
     )
     parser.add_argument(
+        "--sample-id",
+        action="append",
+        default=None,
+        help=(
+            "Only process the given sample_id. Can be passed multiple times. "
+            "Without --input-tags, the output contains only selected samples; "
+            "with --input-tags, non-selected rows are preserved."
+        ),
+    )
+    parser.add_argument(
+        "--input-tags",
+        default=None,
+        help=(
+            "Existing tags-only JSONL used as a base for supplement mode. "
+            "Rows must align with the input manifest."
+        ),
+    )
+    parser.add_argument(
+        "--only-tags",
+        default=None,
+        help=(
+            "Comma-separated tag paths, groups, or stage names to run, for "
+            "example speaker,language_content.topic,basic_acoustic.silence_ratio."
+        ),
+    )
+    parser.add_argument(
+        "--missing-only",
+        action="store_true",
+        help="With --input-tags, only run selected tag paths that are currently null.",
+    )
+    parser.add_argument(
         "--firered-vad-use-gpu",
         action="store_true",
         help="Use GPU in FireRedVAD config. Defaults to CPU.",
@@ -1827,6 +2302,85 @@ def build_arg_parser():
         ),
     )
     parser.add_argument(
+        "--topic-enable",
+        action="store_true",
+        help="Enable OpenAI Responses topic classification for language_content.topic.",
+    )
+    parser.add_argument(
+        "--topic-provider",
+        default=None,
+        help="Topic provider name. Currently supports openai_responses.",
+    )
+    parser.add_argument(
+        "--topic-model",
+        default=None,
+        help="OpenAI Responses model for topic classification.",
+    )
+    parser.add_argument(
+        "--topic-base-url",
+        default=None,
+        help="OpenAI-compatible base URL. Defaults to local_config.py or OpenAI.",
+    )
+    parser.add_argument(
+        "--topic-api-key",
+        default=None,
+        help="OpenAI Responses API key. Prefer OPENAI_API_KEY or api.txt.",
+    )
+    parser.add_argument(
+        "--topic-api-key-path",
+        default=None,
+        help="Path to a file containing the OpenAI Responses API key.",
+    )
+    parser.add_argument(
+        "--topic-model-provider",
+        default=None,
+        help="Optional model provider section name in ~/.codex/config.toml.",
+    )
+    parser.add_argument(
+        "--topic-codex-config-path",
+        default=None,
+        help="Optional Codex TOML config path for OpenAI-compatible provider settings.",
+    )
+    parser.add_argument(
+        "--topic-timeout-sec",
+        type=int,
+        default=None,
+        help="OpenAI Responses timeout in seconds.",
+    )
+    parser.add_argument(
+        "--topic-temperature",
+        type=float,
+        default=None,
+        help="Optional temperature for OpenAI Responses topic classification.",
+    )
+    parser.add_argument(
+        "--topic-use-json-schema",
+        action="store_true",
+        default=None,
+        help="Request Responses JSON schema output instead of json_object.",
+    )
+    parser.add_argument(
+        "--topic-cache-disable",
+        action="store_true",
+        help="Disable JSONL cache for topic responses.",
+    )
+    parser.add_argument(
+        "--topic-cache-path",
+        default=None,
+        help="JSONL cache path for topic responses.",
+    )
+    parser.add_argument(
+        "--topic-fallback",
+        choices=["null", "heuristic", "error"],
+        default=None,
+        help="Topic behavior when the Responses call fails. Defaults to null.",
+    )
+    parser.add_argument(
+        "--topic-short-guard-disable",
+        action="store_true",
+        help="Disable deterministic short-utterance topic guard.",
+    )
+    parser.add_argument(
         "--artifact-dir",
         default=None,
         help=(
@@ -1883,6 +2437,23 @@ def main(argv=None):
     if args.speaker_force_channel_activity:
         speaker_config.force_channel_activity = True
         speaker_config.prefer_channel_activity = True
+    topic_config = TopicConfig(
+        enabled=True if args.topic_enable else None,
+        provider=args.topic_provider,
+        model=args.topic_model,
+        base_url=args.topic_base_url,
+        api_key=args.topic_api_key,
+        api_key_path=args.topic_api_key_path,
+        model_provider=args.topic_model_provider,
+        codex_config_path=args.topic_codex_config_path,
+        timeout_sec=args.topic_timeout_sec,
+        temperature=args.topic_temperature,
+        use_json_schema=args.topic_use_json_schema,
+        cache_enabled=False if args.topic_cache_disable else None,
+        cache_path=args.topic_cache_path,
+        fallback=args.topic_fallback,
+        short_guard_enabled=False if args.topic_short_guard_disable else None,
+    )
     summary = run_manifest(
         args.manifest,
         args.output,
@@ -1894,10 +2465,16 @@ def main(argv=None):
         dnsmos_config=dnsmos_config,
         firered_aed_config=firered_aed_config,
         panns_config=panns_config,
+        topic_config=topic_config,
+        sample_ids=args.sample_id,
+        existing_tags_path=args.input_tags,
+        selected_tag_paths=[args.only_tags] if args.only_tags else None,
+        missing_only=args.missing_only,
     )
     public_summary = {
         "output_path": summary["output_path"],
         "sample_count": summary["sample_count"],
+        "processed_sample_count": summary["processed_sample_count"],
     }
     print(json.dumps(public_summary, ensure_ascii=False, indent=2, sort_keys=True))
     return 0

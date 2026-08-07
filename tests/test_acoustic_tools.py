@@ -15,6 +15,7 @@ from tagger.pipelines.signal import (
     audit_speaker,
     audit_sound_field_scene,
     build_arg_parser,
+    empty_tags,
     resolve_audio_path,
     run_manifest as run_signal_manifest,
     tag_record as tag_signal_record,
@@ -39,6 +40,7 @@ from tagger.tools.basic_acoustic.firered_vad_silence_detector import (
     validate_silence_segments,
 )
 from tagger.tools.basic_acoustic.silence_ratio_calculator import run as run_silence_ratio
+from tagger.tools.language_content.topic import TopicConfig, validate_payload
 from tagger.tools.sound_field_scene.c50_estimator import (
     run as run_c50_estimator,
 )
@@ -253,6 +255,125 @@ class AcousticToolsTest(unittest.TestCase):
                 },
             )
             self.assertEqual(tags["language_content"]["filler"], 1)
+
+    def test_signal_pipeline_prefers_native_metadata_segments_for_vad_and_speaker(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "meeting.wav"
+            write_test_wav(path, sample_rate=16000, channels=1, duration_sec=5.0)
+            record = make_record(str(path))
+            record["sample"]["native_metadata"] = {
+                "utterances": [
+                    {
+                        "utt_id": "u1",
+                        "speaker": "A",
+                        "start": 1.0,
+                        "end": 3.0,
+                        "text": "first speaker",
+                    },
+                    {
+                        "utt_id": "u2",
+                        "speaker": "B",
+                        "start": 2.5,
+                        "end": 4.0,
+                        "text": "second speaker",
+                    },
+                ]
+            }
+
+            tags = tag_signal_record(
+                record,
+                tmpdir,
+                speaker_config=default_speaker_layer_config(enable_moss=False),
+                **missing_signal_model_configs(tmpdir)
+            )
+
+            self.assertEqual(
+                tags["basic_acoustic"]["silence_segments"],
+                [
+                    {"start_sec": 0.0, "end_sec": 1.0},
+                    {"start_sec": 4.0, "end_sec": 5.0},
+                ],
+            )
+            self.assertEqual(tags["basic_acoustic"]["silence_ratio"], 0.4)
+            self.assertTrue(tags["speaker"]["multi_speaker"])
+            self.assertTrue(tags["speaker"]["speaker_change"])
+            self.assertTrue(tags["speaker"]["speaker_overlap"])
+
+    def test_signal_tag_record_populates_openai_responses_topic_when_enabled(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            record = make_record("missing.wav")
+            record["sample"]["text"]["transcript"] = (
+                "We discuss ASR dataset tagging and automatic annotation quality."
+            )
+            client = FakeTopicClient(
+                {
+                    "major_topic": "technology_engineering",
+                    "minor_topic": "artificial_intelligence",
+                    "confidence": 0.82,
+                    "topic_keywords": ["ASR", "dataset", "tagging"],
+                    "proper_nouns": [],
+                    "reason_short": "The transcript discusses ASR annotation.",
+                    "secondary_topics": [],
+                }
+            )
+
+            tags = tag_signal_record(
+                record,
+                tmpdir,
+                topic_config=TopicConfig(enabled=True, cache_enabled=False),
+                topic_client=client,
+            )
+
+            self.assertEqual(
+                tags["language_content"]["topic"],
+                "technology_engineering/artificial_intelligence",
+            )
+            self.assertEqual(client.call_count, 1)
+
+    def test_signal_topic_short_utterance_guard_skips_openai_responses_call(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            record = make_record("missing.wav")
+            record["sample"]["text"]["transcript"] = "Yeah."
+            client = FakeTopicClient(
+                {
+                    "major_topic": "technology_engineering",
+                    "minor_topic": "artificial_intelligence",
+                    "confidence": 0.82,
+                    "topic_keywords": [],
+                    "proper_nouns": [],
+                    "reason_short": "Should not be called.",
+                    "secondary_topics": [],
+                }
+            )
+
+            tags = tag_signal_record(
+                record,
+                tmpdir,
+                topic_config=TopicConfig(enabled=True, cache_enabled=False),
+                topic_client=client,
+            )
+
+            self.assertEqual(
+                tags["language_content"]["topic"],
+                "other/insufficient_context",
+            )
+            self.assertEqual(client.call_count, 0)
+
+    def test_topic_validation_repairs_known_minor_under_wrong_major(self):
+        payload = {
+            "major_topic": "meeting_workflow",
+            "minor_topic": "project_management",
+            "confidence": 0.92,
+            "topic_keywords": ["prototype", "week six"],
+            "proper_nouns": [],
+            "reason_short": "The transcript discusses project planning.",
+            "secondary_topics": [],
+        }
+
+        clean = validate_payload(payload)
+
+        self.assertEqual(clean["major_topic"], "business_management")
+        self.assertEqual(clean["minor_topic"], "project_management")
 
     def test_fire_red_speech_segments_convert_to_silence_segments(self):
         segments = speech_segments_to_silence_segments(
@@ -1420,6 +1541,35 @@ class AcousticToolsTest(unittest.TestCase):
             200.0,
         )
 
+        args = build_arg_parser().parse_args(
+            [
+                "--topic-enable",
+                "--topic-model",
+                "gpt-5.5",
+                "--topic-api-key-path",
+                "api.txt",
+            ]
+        )
+        self.assertTrue(args.topic_enable)
+        self.assertEqual(args.topic_model, "gpt-5.5")
+        self.assertEqual(args.topic_api_key_path, "api.txt")
+
+        args = build_arg_parser().parse_args(
+            [
+                "--sample-id",
+                "utt1",
+                "--input-tags",
+                "old.jsonl",
+                "--only-tags",
+                "speaker,language_content.topic",
+                "--missing-only",
+            ]
+        )
+        self.assertEqual(args.sample_id, ["utt1"])
+        self.assertEqual(args.input_tags, "old.jsonl")
+        self.assertEqual(args.only_tags, "speaker,language_content.topic")
+        self.assertTrue(args.missing_only)
+
     def test_signal_manifest_passes_injected_channel_activity_client(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "stereo.wav"
@@ -1465,6 +1615,44 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertTrue(tags["speaker"]["speaker_change"])
             self.assertTrue(tags["speaker"]["speaker_overlap"])
             self.assertNotIn("channel_activity", tags["speaker"])
+
+    def test_signal_manifest_supplements_selected_sample_tags_from_existing_output(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / "manifest.jsonl"
+            input_tags_path = Path(tmpdir) / "existing_tags.jsonl"
+            output_path = Path(tmpdir) / "updated_tags.jsonl"
+            first = make_record("missing_first.wav")
+            first["sample"]["sample_id"] = "first"
+            first["sample"]["text"]["transcript"] = "Um hello."
+            second = make_record("missing_second.wav")
+            second["sample"]["sample_id"] = "second"
+            second["sample"]["text"]["transcript"] = "Keep this row."
+            with manifest_path.open("w", encoding="utf-8") as sink:
+                sink.write(json.dumps(first, ensure_ascii=False) + "\n")
+                sink.write(json.dumps(second, ensure_ascii=False) + "\n")
+
+            first_tags = empty_tags()
+            second_tags = empty_tags()
+            second_tags["language_content"]["filler"] = 99
+            with input_tags_path.open("w", encoding="utf-8") as sink:
+                sink.write(json.dumps(first_tags, ensure_ascii=False) + "\n")
+                sink.write(json.dumps(second_tags, ensure_ascii=False) + "\n")
+
+            summary = run_signal_manifest(
+                manifest_path,
+                output_path,
+                sample_ids=["first"],
+                existing_tags_path=input_tags_path,
+                selected_tag_paths=["language_content.filler"],
+            )
+
+            with output_path.open("r", encoding="utf-8") as source:
+                rows = [json.loads(line) for line in source if line.strip()]
+            self.assertEqual(summary["sample_count"], 2)
+            self.assertEqual(summary["processed_sample_count"], 1)
+            self.assertEqual(rows[0]["language_content"]["filler"], 1)
+            self.assertEqual(rows[1]["language_content"]["filler"], 99)
+            self.assertIsNone(rows[0]["basic_acoustic"]["duration_sec"])
 
     def test_signal_pipeline_does_not_treat_mix_headset_stereo_as_separated_channels(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1562,6 +1750,18 @@ class FakeDnsmosClient:
         self.output = output
 
     def estimate(self, audio_path, context=None):
+        return self.output
+
+
+class FakeTopicClient:
+    def __init__(self, output):
+        self.output = output
+        self.call_count = 0
+        self.prompts = []
+
+    def complete_json(self, prompt):
+        self.call_count += 1
+        self.prompts.append(prompt)
         return self.output
 
 

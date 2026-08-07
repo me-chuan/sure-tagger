@@ -4,6 +4,7 @@ from tagger.tools.basic_acoustic import audio_probe
 from tagger.tools.basic_acoustic import brouhaha_signal_estimator
 from tagger.tools.basic_acoustic import dnsmos_quality_estimator
 from tagger.tools.basic_acoustic import firered_vad_silence_detector
+from tagger.tools.basic_acoustic import native_metadata_vad
 from tagger.tools.basic_acoustic import silence_ratio_calculator
 
 
@@ -17,6 +18,12 @@ FIRERED_VAD_SILENCE_TOOL = {
     "tag_path": "basic_acoustic.silence_segments",
     "tool_name": firered_vad_silence_detector.TOOL_NAME,
     "run": firered_vad_silence_detector.run,
+}
+
+NATIVE_METADATA_VAD_TOOL = {
+    "tag_path": "basic_acoustic.silence_segments",
+    "tool_name": native_metadata_vad.TOOL_NAME,
+    "run": native_metadata_vad.run,
 }
 
 SILENCE_RATIO_TOOL = {
@@ -39,6 +46,7 @@ DNSMOS_QUALITY_TOOL = {
 
 BASIC_ACOUSTIC_TOOLS = [
     AUDIO_PROBE_TOOL,
+    NATIVE_METADATA_VAD_TOOL,
     FIRERED_VAD_SILENCE_TOOL,
     SILENCE_RATIO_TOOL,
     BROUHAHA_ACOUSTIC_TOOL,

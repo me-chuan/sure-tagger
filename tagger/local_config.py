@@ -24,6 +24,10 @@ Fill MOSS_DIARIZE_* with the local OpenMOSS MOSS-Transcribe-Diarize Python
 environment before running speaker diarization. This project calls the local
 model directly instead of requiring a hosted API service.
 
+Fill TOPIC_* or pass matching CLI options before enabling OpenAI Responses topic
+classification. Secrets should stay in `api.txt`, environment variables, or a
+local Codex config file, not in this tracked file.
+
 Model tools can run in subprocesses so incompatible model dependencies do not
 need to share one Python environment.
 """
@@ -78,3 +82,20 @@ SPEAKER_CHANNEL_ENERGY_THRESHOLD = 200.0
 SPEAKER_CHANNEL_LEAKAGE_RELATIVE_DB = -18.0
 SPEAKER_MIN_SEGMENT_DURATION_SEC = 0.10
 SPEAKER_MERGE_SAME_SPEAKER_GAP_SEC = 0.30
+
+TOPIC_ENABLE = False
+TOPIC_PROVIDER = "openai_responses"
+TOPIC_MODEL = ""
+TOPIC_BASE_URL = ""
+TOPIC_API_KEY = ""
+TOPIC_API_KEY_PATH = "api.txt"
+TOPIC_MODEL_PROVIDER = ""
+TOPIC_CODEX_CONFIG_PATH = ""
+TOPIC_TIMEOUT_SEC = 180
+TOPIC_TEMPERATURE = None
+TOPIC_USE_JSON_SCHEMA = False
+TOPIC_CACHE_ENABLED = True
+TOPIC_CACHE_PATH = "outputs/cache/topic_openai_responses_cache.jsonl"
+TOPIC_FALLBACK = "null"
+TOPIC_SHORT_GUARD_ENABLED = True
+TOPIC_SHORT_GUARD_MAX_TOKENS = 3

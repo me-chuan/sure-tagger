@@ -22,7 +22,7 @@
 - 先结构化 closed raw-only 输入，再运行登记的 Python 标签程序。
 - `corpus` 和 `sample` 在 pipeline 中视为不可变原始输入。
 - 输入对象只能包含数据集原生数据，不得混入工具输出、推理、归一化结果、解析文档正文、运行时 provenance 或默认值。
-- 最终 tag 只能来自 registry 登记的 Python 标签程序输出；不得由 LLM、人工推断、未登记脚本、corpus-level 默认值或 native metadata 直接生成。
+- 最终 tag 只能来自 registry 登记的 Python 标签程序输出；登记工具可以在显式启用时调用模型或外部 API，但不得由人工推断、未登记脚本、corpus-level 默认值、native metadata 或绕过 pipeline 的 LLM 输出直接生成。
 - 工具内部可以使用模型、规则、阈值、缓存、证据和审计信息，但这些内容不得进入公开 tags-only 输出。
 - 程序未实现、不可用、失败、缺失字段或输出非法时，对应最终 tag 为 `null`。
 - 新增或变更 tag 时，同步更新 schema、registry、pipeline、resolver/auditor 和测试样例；只有全局接口变化才需要更新本文件。

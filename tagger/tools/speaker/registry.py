@@ -3,6 +3,7 @@
 from tagger.tools.speaker import channel_activity
 from tagger.tools.speaker import metrics
 from tagger.tools.speaker import moss_diarizer
+from tagger.tools.speaker import native_metadata_diarizer
 
 
 MOSS_DIARIZE_TOOL = {
@@ -11,6 +12,12 @@ MOSS_DIARIZE_TOOL = {
     "run": moss_diarizer.run,
     "run_channel_purity_check": moss_diarizer.run_channel_purity_check,
     "run_merged_channels": moss_diarizer.run_merged_channels,
+}
+
+NATIVE_METADATA_DIARIZE_TOOL = {
+    "tag_path": "speaker.diarization_timeline",
+    "tool_name": native_metadata_diarizer.TOOL_NAME,
+    "run": native_metadata_diarizer.run,
 }
 
 CHANNEL_ACTIVITY_TOOL = {
@@ -26,6 +33,7 @@ SPEAKER_METRICS_TOOL = {
 }
 
 SPEAKER_TOOLS = [
+    NATIVE_METADATA_DIARIZE_TOOL,
     MOSS_DIARIZE_TOOL,
     CHANNEL_ACTIVITY_TOOL,
     SPEAKER_METRICS_TOOL,

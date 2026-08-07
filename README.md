@@ -49,6 +49,29 @@ Run the sample-level signal pipeline on the bundled sample manifest:
 python3 scripts/run_signal.py
 ```
 
+Run the full pipeline for one sample only:
+
+```bash
+python3 scripts/run_signal.py \
+  --manifest phase2_asr_sample/manifest.jsonl \
+  --output outputs/one_sample_tags.jsonl \
+  --sample-id EN2001a_utterance_00000
+```
+
+Supplement selected tags into an existing tags-only output:
+
+```bash
+python3 scripts/run_signal.py \
+  --manifest phase2_asr_sample/manifest.jsonl \
+  --input-tags outputs/phase2_full_pipeline_tags.jsonl \
+  --output outputs/phase2_topic_patch.jsonl \
+  --sample-id EN2001a_utterance_00000 \
+  --only-tags language_content.topic \
+  --topic-enable \
+  --topic-model gpt-5.5 \
+  --topic-api-key-path api.txt
+```
+
 Compare Brouhaha C50 against Rec-RIR-derived C50 on the bundled manifest:
 
 ```bash
@@ -76,6 +99,11 @@ to have one speaker per channel.
 
 Model-backed tools require local model directories/checkpoints configured in
 `tagger/local_config.py`.
+
+OpenAI Responses topic classification reads credentials in this order:
+`OPENAI_API_KEY`, `--topic-api-key`, `api.txt` or `--topic-api-key-path`, then
+the selected provider env in `~/.codex/config.toml`. Do not commit secrets;
+`api.txt`, `.env*`, and `.codex/` are git-ignored.
 
 See [the tag and method documentation](docs/tags-and-methods.md) for the public
 fields, preprocessing, and JSON examples. Tool-specific setup details are kept

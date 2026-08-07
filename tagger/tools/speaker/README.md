@@ -90,7 +90,9 @@ sample_rate_hz
 channels
 ```
 
-speaker layer 不依赖 transcript，也不读取人工 speaker label。
+speaker layer 不依赖 transcript。若 `sample.native_metadata` 已包含
+speaker/start/end segment，pipeline 会优先使用这些原生标注构建 timeline；
+没有可用 segment 时才退化到 MOSS 或 channel activity。
 
 ### 2. Route 选择
 
@@ -98,6 +100,7 @@ pipeline 根据音频和原生 metadata 选择 route：
 
 | input | route | tool |
 | --- | --- | --- |
+| `sample.native_metadata` has usable speaker segments | native metadata timeline | `native_metadata_diarizer.py` |
 | `mix_headset` / mono mixed recording | MOSS diarize | `moss_diarizer.py` |
 | `separated_headset_channels` / explicit single-speaker-per-channel assertion | per-channel energy VAD | `channel_activity.py` |
 | `separated_headset_channels` / MOSS confirms every channel has one speaker | per-channel energy VAD | `moss_diarizer.py` + `channel_activity.py` |
@@ -108,6 +111,22 @@ pipeline 根据音频和原生 metadata 选择 route：
 | no usable route or tool failure | null speaker tags | pipeline fallback |
 
 MOSS channel purity check 的结果只进入内部 evidence，不进入公开 tags-only output。公开 speaker schema 保持不变。
+
+Native metadata route 识别这些字段：
+
+```text
+speaker_segments
+diarization_segments
+segments
+utterances
+```
+
+每个 segment 至少需要 `start`/`end` 或 `start_sec`/`end_sec`，speaker 字段
+可为 `speaker`、`speaker_id`、`label` 或 `spk`。AMI 风格
+`utterances[]` 会被当作当前 sample 内的 speaker timeline，用于直接派生
+`multi_speaker`、`speaker_change` 和 `speaker_overlap`。如果 metadata times
+看起来是 recording-absolute 且顶层有 `start`，会先转换成 sample-relative
+时间。
 
 ### 3. Route 输出归一
 
