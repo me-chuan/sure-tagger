@@ -12,7 +12,7 @@
         <p class="eyebrow">Sure Tagger / Phase 2</p>
         <h1>ASR 数据集二次打标展示</h1>
         <p class="lead">
-          将 ASR manifest、音频、transcript 和原始 metadata 转换为统一标签：声学质量、声场场景、语言内容 topic、静音片段和多说话人信息。
+          将 phase2 ASR manifest、音频、transcript 和原始 metadata 转换为统一标签：声学质量、声场场景、语言内容 topic、静音片段和多说话人信息。
         </p>
       </div>
       <nav class="topnav" aria-label="页面导航">
@@ -26,7 +26,7 @@
       <section class="summary-band" aria-labelledby="summary-title">
         <div class="section-heading">
           <p class="eyebrow">Current run</p>
-          <h2 id="summary-title">Phase 2 全链路 + AMI smoke 结果</h2>
+          <h2 id="summary-title">Phase 2 全量补标结果</h2>
         </div>
         <div class="metric-grid" id="metricGrid"></div>
       </section>
@@ -50,12 +50,12 @@
           <article class="pipeline-step">
             <span class="step-index">03</span>
             <h3>Acoustic + Scene</h3>
-            <p>提取时长、SNR、DNSMOS、RT60、C50、音频事件；AMI smoke 中静音片段优先来自 metadata。</p>
+            <p>提取时长、SNR、DNSMOS、RT60、C50、音频事件；有原始分段时静音片段优先来自 metadata。</p>
           </article>
           <article class="pipeline-step">
             <span class="step-index">04</span>
             <h3>Unified Tags</h3>
-            <p>输出按 tag group 组织的 JSON，speaker 标签优先使用 utterance metadata，缺失时再退回模型。</p>
+            <p>输出按 tag group 组织的 JSON，speaker 标签优先使用 utterance metadata，缺失时再退回 MOSS diarize。</p>
           </article>
         </div>
       </section>
@@ -125,8 +125,8 @@
     </main>
 
     <footer class="footer">
-      <span>Demo data: phase2 full pipeline tags + AMI EN2001a topic/VAD/speaker smoke</span>
-      <span>AMI speaker/VAD 展示 metadata-first 路径，MOSS diarize 仍可作为缺失 metadata 时的退化路径。</span>
+      <span>Demo data: phase2 full pipeline tags + topic/speaker supplement</span>
+      <span>Speaker 标签优先走 metadata，缺失 metadata 时使用本地 MOSS diarize；无 transcript 噪声样本补为非多说话人。</span>
     </footer>
 
     <script src="data.js"></script>
