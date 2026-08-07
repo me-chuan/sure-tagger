@@ -73,6 +73,11 @@ function formatDuration(value) {
   return `${formatNumber(value, 2)}s`;
 }
 
+function formatUnit(value, unit, digits = 2) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "未生成";
+  return `${formatNumber(value, digits)} ${unit}`;
+}
+
 function compactDataset(name) {
   return name.replace("TUT Urban Acoustic Scenes 2018", "TUT 2018").replace("WHAM! noise", "WHAM");
 }
@@ -82,11 +87,12 @@ function hasTranscript(sample) {
 }
 
 function renderMetrics() {
+  const smoke = data.summary.smoke || {};
   const metrics = [
     ["Phase2 samples", data.summary.sampleCount, `${data.summary.datasetCount} 个数据集，每个 5 条样本`],
     ["Demo audio", data.summary.selectedCount, "精选代表性音频，可播放和查看波形"],
-    ["RIR artifacts", data.summary.rirArtifactCount, "Rec-RIR 输出已落盘"],
-    ["Language layer", `${data.summary.coverage.language_content}/${data.summary.sampleCount}`, "topic/context 预留为空"],
+    ["AMI smoke", `${smoke.sampleCount || 0}/3`, "topic + metadata VAD + speaker 已跑通"],
+    ["Topic labels", `${smoke.topicCount || 0}/3`, "OpenAI Responses 输出层级 topic"],
   ];
 
   els.metricGrid.innerHTML = metrics
@@ -142,6 +148,8 @@ function renderSampleList() {
       const transcriptState = hasTranscript(sample) ? "transcript" : "no transcript";
       const sound = sample.tags.sound_field_scene?.sound || [];
       const soundState = sound.length ? `sound: ${sound.slice(0, 2).join(", ")}` : "sound: none";
+      const topic = sample.tags.language_content?.topic;
+      const speaker = speakerHasValues(sample.tags.speaker) ? "speaker: ready" : "speaker: none";
       const color = datasetColors.get(sample.dataset) || "#16796f";
       return `
         <button type="button" class="sample-button ${active}" data-sample="${escapeAttr(sample.sampleId)}">
@@ -152,7 +160,8 @@ function renderSampleList() {
             <span>${compactDataset(sample.dataset)}</span>
             <span>${formatDuration(sample.durationSec)}</span>
             <span>${transcriptState}</span>
-            <span>${soundState}</span>
+            <span>${topic ? `topic: ${topic}` : soundState}</span>
+            <span>${speaker}</span>
           </div>
         </button>
       `;
@@ -234,15 +243,16 @@ function getCardsForGroup(sample, group) {
   const speaker = tags.speaker || {};
 
   if (group === "overview") {
+    const speakerReady = speakerHasValues(speaker);
     return [
       card("Duration", formatDuration(basic.duration_sec), `${formatNumber(basic.sample_rate_hz, 0)} Hz / ${basic.channels || "?"} channel`),
-      card("SNR", `${formatNumber(basic.snr_db, 2)} dB`, "更高通常表示背景噪声更少"),
+      card("SNR", formatUnit(basic.snr_db, "dB", 2), "更高通常表示背景噪声更少", basic.snr_db == null),
       card("Silence ratio", formatPercent(basic.silence_ratio), `${(basic.silence_segments || []).length} silence segment(s)`),
       card("DNSMOS OVRL", formatNumber(basic.dnsmos_ovrl, 2), "模型估计的整体语音质量", basic.dnsmos_ovrl == null),
       card("Language", lang.language || "未生成", hasTranscript(sample) ? `${lang.word_count ?? 0} words/chars` : "缺少 transcript", !lang.language),
-      card("Events", listValue(scene.audio_events), "PANNs audio event tags", !scene.audio_events?.length),
-      card("RT60", `${formatNumber(scene.rt60, 3)} s`, "Rec-RIR reverberation estimate", scene.rt60 == null),
-      card("Speaker", speakerStatus(speaker), "MOSS diarize 待本地环境接入", true),
+      card("Topic", lang.topic || "未生成", "OpenAI Responses taxonomy label", !lang.topic),
+      card("RT60", formatUnit(scene.rt60, "s", 3), "Rec-RIR reverberation estimate", scene.rt60 == null),
+      card("Speaker", speakerStatus(speaker), speakerReady ? "metadata-first diarization flags" : "未生成", !speakerReady),
     ];
   }
 
@@ -251,10 +261,10 @@ function getCardsForGroup(sample, group) {
       card("duration_sec", formatNumber(basic.duration_sec, 3), "音频时长"),
       card("sample_rate_hz", formatNumber(basic.sample_rate_hz, 0), "采样率"),
       card("channels", basic.channels ?? "未生成", "声道数"),
-      card("snr_db", `${formatNumber(basic.snr_db, 3)} dB`, "估计信噪比"),
+      card("snr_db", formatUnit(basic.snr_db, "dB", 3), "估计信噪比", basic.snr_db == null),
       card("c50", formatNumber(basic.c50, 3), "清晰度指标"),
-      card("silence_ratio", formatPercent(basic.silence_ratio), "静音占比"),
-      card("silence_segments", listSegments(basic.silence_segments), "检测到的静音片段", !basic.silence_segments?.length),
+      card("silence_ratio", formatPercent(basic.silence_ratio), "metadata 优先；缺失时退回 VAD 模型"),
+      card("silence_segments", listSegments(basic.silence_segments), "静音片段，波形中以琥珀色显示", !basic.silence_segments?.length),
       card("dnsmos_sig", formatNumber(basic.dnsmos_sig, 3), "speech quality"),
       card("dnsmos_bak", formatNumber(basic.dnsmos_bak, 3), "background quality", basic.dnsmos_bak == null),
       card("dnsmos_ovrl", formatNumber(basic.dnsmos_ovrl, 3), "overall quality", basic.dnsmos_ovrl == null),
@@ -267,7 +277,7 @@ function getCardsForGroup(sample, group) {
       card("audio_events", listValue(scene.audio_events), "PANNs top events", !scene.audio_events?.length),
       card("sound", listValue(scene.sound), "detected non-speech sound", !scene.sound?.length),
       card("music", scene.music === true ? "true" : "false", "music flag"),
-      card("rt60", `${formatNumber(scene.rt60, 4)} s`, "reverberation time", scene.rt60 == null),
+      card("rt60", formatUnit(scene.rt60, "s", 4), "reverberation time", scene.rt60 == null),
       card("c50", formatNumber(scene.c50, 4), "scene clarity"),
       card("far_field", scene.far_field ?? "未生成", "预留字段", scene.far_field == null),
     ];
@@ -280,14 +290,15 @@ function getCardsForGroup(sample, group) {
       card("filler", lang.filler ?? "未生成", "um/uh/okay 等填充表达"),
       card("punctuation", punctuationValue(lang.punctuation), "标点统计", !lang.punctuation),
       card("repetition", repetitionValue(lang.repetition), "重复词统计", !lang.repetition),
-      card("topic", lang.topic ?? "预留为空", "topic/context 暂未接入", true),
+      card("topic", lang.topic ?? "未生成", "OpenAI Responses 层级 topic", !lang.topic),
     ];
   }
 
+  const speakerReady = speakerHasValues(speaker);
   return [
-    card("multi_speaker", speaker.multi_speaker ?? "未生成", "等待本地 MOSS diarize 环境", true),
-    card("speaker_change", speaker.speaker_change ?? "未生成", "等待本地 MOSS diarize 环境", true),
-    card("speaker_overlap", speaker.speaker_overlap ?? "未生成", "等待本地 MOSS diarize 环境", true),
+    card("multi_speaker", speaker.multi_speaker ?? "未生成", "metadata 优先；缺失时退回 diarization", !speakerReady),
+    card("speaker_change", speaker.speaker_change ?? "未生成", "当前 utterance 内是否存在说话人切换", !speakerReady),
+    card("speaker_overlap", speaker.speaker_overlap ?? "未生成", "当前 utterance 内是否存在重叠说话", !speakerReady),
   ];
 }
 
@@ -317,8 +328,12 @@ function repetitionValue(value) {
 
 function speakerStatus(value) {
   if (!value) return "未生成";
-  const hasAny = Object.values(value).some((item) => item !== null && item !== undefined);
-  return hasAny ? "已生成" : "预留";
+  return speakerHasValues(value) ? "已生成" : "未生成";
+}
+
+function speakerHasValues(value) {
+  if (!value) return false;
+  return Object.values(value).some((item) => item !== null && item !== undefined);
 }
 
 function renderBars() {
