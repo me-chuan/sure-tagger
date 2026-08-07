@@ -3,6 +3,9 @@
 本文档说明 `scripts/run_tagger.py` 当前能够生成的公开标签、每个标签的
 计算方法、音频预处理方式，以及输入和输出 JSON 示例。
 
+Pipeline 主入口、stage 调度、fallback、无 transcript guard 和补标模式见
+`docs/pipeline-architecture.md`。
+
 ## 1. 运行方式
 
 CPU 运行：
