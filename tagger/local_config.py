@@ -64,13 +64,13 @@ DNSMOS_MODEL_VERSION = "github:microsoft/DNS-Challenge@591184a9fcb2cbdec02520fed
 DNSMOS_PYTHON = ".runtime/recrir_py310_torch271/bin/python"
 
 MOSS_DIARIZE_ENDPOINT = ""
-MOSS_DIARIZE_MODEL = "OpenMOSS-Team/MOSS-Transcribe-Diarize"
+MOSS_DIARIZE_MODEL = "models/MOSS-Transcribe-Diarize-model"
 MOSS_DIARIZE_TIMEOUT_SEC = 900
 MOSS_DIARIZE_MAX_NEW_TOKENS = 65536
 MOSS_DIARIZE_API_KEY = ""
 MOSS_DIARIZE_PYTHON = ".runtime/moss_transcribe_diarize_py312/bin/python"
-MOSS_DIARIZE_DEVICE = "auto"
-MOSS_DIARIZE_TORCH_DTYPE = "auto"
+MOSS_DIARIZE_DEVICE = "cuda:1"
+MOSS_DIARIZE_TORCH_DTYPE = "float16"
 MOSS_DIARIZE_PROMPT = ""
 
 SPEAKER_CHANNEL_WINDOW_SEC = 0.05
