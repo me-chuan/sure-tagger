@@ -87,12 +87,11 @@ function hasTranscript(sample) {
 }
 
 function renderMetrics() {
-  const smoke = data.summary.smoke || {};
   const metrics = [
     ["Phase2 samples", data.summary.sampleCount, `${data.summary.datasetCount} 个数据集，每个 5 条样本`],
-    ["Demo audio", data.summary.selectedCount, "精选代表性音频，可播放和查看波形"],
-    ["AMI smoke", `${smoke.sampleCount || 0}/3`, "topic + metadata VAD + speaker 已跑通"],
-    ["Topic labels", `${smoke.topicCount || 0}/3`, "OpenAI Responses 输出层级 topic"],
+    ["Playable audio", data.summary.selectedCount, "phase2 全量音频，可播放和查看波形"],
+    ["Topic labels", `${data.summary.topicCount}/${data.summary.sampleCount}`, "OpenAI Responses 输出层级 topic"],
+    ["Speaker labels", `${data.summary.speakerCount}/${data.summary.sampleCount}`, `${data.summary.speakerMultiCount} 条 multi-speaker`],
   ];
 
   els.metricGrid.innerHTML = metrics
