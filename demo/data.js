@@ -78,7 +78,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.5,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 10.435,
@@ -143,7 +143,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.31,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 3.275,
@@ -207,7 +207,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.34,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 6.625,
@@ -271,7 +271,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.41,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 2.68,
@@ -335,7 +335,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.18,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 1.58,
@@ -403,7 +403,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.41,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 4.203938,
@@ -467,7 +467,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.46,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 4.115,
@@ -516,7 +516,7 @@ window.DEMO_DATA = {
       "audio": "assets/audio/aishell_BAC009S0764W0123.wav",
       "transcript": "但 因为 聚集 了 过多 公共 资源",
       "nativeMetadata": {},
-      "durationSec": 4.0,
+      "durationSec": 4,
       "tags": {
         "basic_acoustic": {
           "c50": 18.41354,
@@ -525,16 +525,16 @@ window.DEMO_DATA = {
           "dnsmos_ovrl": 2.18487,
           "dnsmos_p808": 3.57581,
           "dnsmos_sig": 2.889049,
-          "duration_sec": 4.0,
+          "duration_sec": 4,
           "sample_rate_hz": 16000,
           "silence_ratio": 0.1825,
           "silence_segments": [
             {
               "end_sec": 0.47,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
-              "end_sec": 4.0,
+              "end_sec": 4,
               "start_sec": 3.74
             }
           ],
@@ -595,7 +595,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.45,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 5.237,
@@ -659,7 +659,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.46,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 4.311,
@@ -723,7 +723,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.55,
-              "start_sec": 0.0
+              "start_sec": 0
             }
           ],
           "snr_db": 50.160365
@@ -783,7 +783,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.77,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 3.628812,
@@ -847,7 +847,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.52,
-              "start_sec": 0.0
+              "start_sec": 0
             }
           ],
           "snr_db": 44.730727
@@ -907,7 +907,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.51,
-              "start_sec": 0.0
+              "start_sec": 0
             }
           ],
           "snr_db": 30.496323
@@ -967,7 +967,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.64,
-              "start_sec": 0.0
+              "start_sec": 0
             }
           ],
           "snr_db": 47.395483
@@ -1027,7 +1027,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.61,
-              "start_sec": 0.0
+              "start_sec": 0
             }
           ],
           "snr_db": -0.23553
@@ -1083,7 +1083,7 @@ window.DEMO_DATA = {
           "dnsmos_sig": 1.471661,
           "duration_sec": 7.631938,
           "sample_rate_hz": 16000,
-          "silence_ratio": 0.0,
+          "silence_ratio": 0,
           "silence_segments": [],
           "snr_db": -1.029779
         },
@@ -1142,7 +1142,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.65,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 8.119813,
@@ -1208,7 +1208,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.39,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 6.631687,
@@ -1274,7 +1274,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.42,
-              "start_sec": 0.0
+              "start_sec": 0
             }
           ],
           "snr_db": 1.25796
@@ -1336,7 +1336,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 2.89,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 7.82,
@@ -1420,7 +1420,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.3,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 2.05,
@@ -1518,7 +1518,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.8,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 4.19,
@@ -1598,7 +1598,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 7.01,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 7.8,
@@ -1678,7 +1678,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 0.3,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 2.38,
@@ -1773,7 +1773,7 @@ window.DEMO_DATA = {
       "audio": "assets/audio/tut2018_airport-barcelona-0-0-a.wav",
       "transcript": "",
       "nativeMetadata": {},
-      "durationSec": 10.0,
+      "durationSec": 10,
       "tags": {
         "basic_acoustic": {
           "c50": 26.950598,
@@ -1782,13 +1782,13 @@ window.DEMO_DATA = {
           "dnsmos_ovrl": 1.376679,
           "dnsmos_p808": 2.270874,
           "dnsmos_sig": 1.963975,
-          "duration_sec": 10.0,
+          "duration_sec": 10,
           "sample_rate_hz": 16000,
-          "silence_ratio": 1.0,
+          "silence_ratio": 1,
           "silence_segments": [
             {
-              "end_sec": 10.0,
-              "start_sec": 0.0
+              "end_sec": 10,
+              "start_sec": 0
             }
           ],
           "snr_db": -0.630383
@@ -1831,7 +1831,7 @@ window.DEMO_DATA = {
       "audio": "assets/audio/tut2018_bus-barcelona-15-599-a.wav",
       "transcript": "",
       "nativeMetadata": {},
-      "durationSec": 10.0,
+      "durationSec": 10,
       "tags": {
         "basic_acoustic": {
           "c50": 14.687956,
@@ -1840,13 +1840,13 @@ window.DEMO_DATA = {
           "dnsmos_ovrl": 1.304132,
           "dnsmos_p808": 2.259291,
           "dnsmos_sig": 1.888589,
-          "duration_sec": 10.0,
+          "duration_sec": 10,
           "sample_rate_hz": 16000,
-          "silence_ratio": 1.0,
+          "silence_ratio": 1,
           "silence_segments": [
             {
-              "end_sec": 10.0,
-              "start_sec": 0.0
+              "end_sec": 10,
+              "start_sec": 0
             }
           ],
           "snr_db": -4.011834
@@ -1889,7 +1889,7 @@ window.DEMO_DATA = {
       "audio": "assets/audio/tut2018_metro-barcelona-41-1221-a.wav",
       "transcript": "",
       "nativeMetadata": {},
-      "durationSec": 10.0,
+      "durationSec": 10,
       "tags": {
         "basic_acoustic": {
           "c50": 5.682715,
@@ -1898,7 +1898,7 @@ window.DEMO_DATA = {
           "dnsmos_ovrl": 1.106247,
           "dnsmos_p808": 2.390622,
           "dnsmos_sig": 1.217053,
-          "duration_sec": 10.0,
+          "duration_sec": 10,
           "sample_rate_hz": 16000,
           "silence_ratio": 0.197,
           "silence_segments": [
@@ -1962,7 +1962,7 @@ window.DEMO_DATA = {
       "audio": "assets/audio/tut2018_park-barcelona-89-2429-a.wav",
       "transcript": "",
       "nativeMetadata": {},
-      "durationSec": 10.0,
+      "durationSec": 10,
       "tags": {
         "basic_acoustic": {
           "c50": 22.983443,
@@ -1971,13 +1971,13 @@ window.DEMO_DATA = {
           "dnsmos_ovrl": 1.643358,
           "dnsmos_p808": 2.137449,
           "dnsmos_sig": 2.202087,
-          "duration_sec": 10.0,
+          "duration_sec": 10,
           "sample_rate_hz": 16000,
-          "silence_ratio": 1.0,
+          "silence_ratio": 1,
           "silence_segments": [
             {
-              "end_sec": 10.0,
-              "start_sec": 0.0
+              "end_sec": 10,
+              "start_sec": 0
             }
           ],
           "snr_db": -3.138264
@@ -2020,7 +2020,7 @@ window.DEMO_DATA = {
       "audio": "assets/audio/tut2018_street_traffic-barcelona-161-4901-a.wav",
       "transcript": "",
       "nativeMetadata": {},
-      "durationSec": 10.0,
+      "durationSec": 10,
       "tags": {
         "basic_acoustic": {
           "c50": 19.665466,
@@ -2029,13 +2029,13 @@ window.DEMO_DATA = {
           "dnsmos_ovrl": null,
           "dnsmos_p808": 2.286138,
           "dnsmos_sig": 1.381033,
-          "duration_sec": 10.0,
+          "duration_sec": 10,
           "sample_rate_hz": 16000,
-          "silence_ratio": 1.0,
+          "silence_ratio": 1,
           "silence_segments": [
             {
-              "end_sec": 10.0,
-              "start_sec": 0.0
+              "end_sec": 10,
+              "start_sec": 0
             }
           ],
           "snr_db": -4.8527
@@ -2080,7 +2080,7 @@ window.DEMO_DATA = {
       "audio": "assets/audio/noisex92_babble.wav",
       "transcript": "",
       "nativeMetadata": {},
-      "durationSec": 10.0,
+      "durationSec": 10,
       "tags": {
         "basic_acoustic": {
           "c50": 13.457497,
@@ -2089,7 +2089,7 @@ window.DEMO_DATA = {
           "dnsmos_ovrl": 1.095176,
           "dnsmos_p808": 2.211675,
           "dnsmos_sig": 1.173304,
-          "duration_sec": 10.0,
+          "duration_sec": 10,
           "sample_rate_hz": 16000,
           "silence_ratio": 0.032,
           "silence_segments": [
@@ -2144,7 +2144,7 @@ window.DEMO_DATA = {
       "audio": "assets/audio/noisex92_f16.wav",
       "transcript": "",
       "nativeMetadata": {},
-      "durationSec": 10.0,
+      "durationSec": 10,
       "tags": {
         "basic_acoustic": {
           "c50": 23.014076,
@@ -2153,13 +2153,13 @@ window.DEMO_DATA = {
           "dnsmos_ovrl": 1.079335,
           "dnsmos_p808": 2.188886,
           "dnsmos_sig": 1.157146,
-          "duration_sec": 10.0,
+          "duration_sec": 10,
           "sample_rate_hz": 16000,
-          "silence_ratio": 1.0,
+          "silence_ratio": 1,
           "silence_segments": [
             {
-              "end_sec": 10.0,
-              "start_sec": 0.0
+              "end_sec": 10,
+              "start_sec": 0
             }
           ],
           "snr_db": -5.685234
@@ -2209,7 +2209,7 @@ window.DEMO_DATA = {
       "audio": "assets/audio/noisex92_factory1.wav",
       "transcript": "",
       "nativeMetadata": {},
-      "durationSec": 10.0,
+      "durationSec": 10,
       "tags": {
         "basic_acoustic": {
           "c50": 22.166993,
@@ -2218,13 +2218,13 @@ window.DEMO_DATA = {
           "dnsmos_ovrl": 1.083776,
           "dnsmos_p808": 2.135229,
           "dnsmos_sig": 1.139457,
-          "duration_sec": 10.0,
+          "duration_sec": 10,
           "sample_rate_hz": 16000,
-          "silence_ratio": 1.0,
+          "silence_ratio": 1,
           "silence_segments": [
             {
-              "end_sec": 10.0,
-              "start_sec": 0.0
+              "end_sec": 10,
+              "start_sec": 0
             }
           ],
           "snr_db": -0.386923
@@ -2272,7 +2272,7 @@ window.DEMO_DATA = {
       "audio": "assets/audio/noisex92_machinegun.wav",
       "transcript": "",
       "nativeMetadata": {},
-      "durationSec": 10.0,
+      "durationSec": 10,
       "tags": {
         "basic_acoustic": {
           "c50": 22.828918,
@@ -2281,13 +2281,13 @@ window.DEMO_DATA = {
           "dnsmos_ovrl": 1.033274,
           "dnsmos_p808": 2.437489,
           "dnsmos_sig": 1.053353,
-          "duration_sec": 10.0,
+          "duration_sec": 10,
           "sample_rate_hz": 16000,
-          "silence_ratio": 1.0,
+          "silence_ratio": 1,
           "silence_segments": [
             {
-              "end_sec": 10.0,
-              "start_sec": 0.0
+              "end_sec": 10,
+              "start_sec": 0
             }
           ],
           "snr_db": 0.631293
@@ -2332,7 +2332,7 @@ window.DEMO_DATA = {
       "audio": "assets/audio/noisex92_volvo.wav",
       "transcript": "",
       "nativeMetadata": {},
-      "durationSec": 10.0,
+      "durationSec": 10,
       "tags": {
         "basic_acoustic": {
           "c50": 22.891291,
@@ -2341,13 +2341,13 @@ window.DEMO_DATA = {
           "dnsmos_ovrl": 1.777615,
           "dnsmos_p808": 2.312987,
           "dnsmos_sig": 2.497058,
-          "duration_sec": 10.0,
+          "duration_sec": 10,
           "sample_rate_hz": 16000,
-          "silence_ratio": 1.0,
+          "silence_ratio": 1,
           "silence_segments": [
             {
-              "end_sec": 10.0,
-              "start_sec": 0.0
+              "end_sec": 10,
+              "start_sec": 0
             }
           ],
           "snr_db": -2.497315
@@ -2403,7 +2403,7 @@ window.DEMO_DATA = {
           "dnsmos_sig": 1.16793,
           "duration_sec": 8.933063,
           "sample_rate_hz": 16000,
-          "silence_ratio": 0.0,
+          "silence_ratio": 0,
           "silence_segments": [],
           "snr_db": -0.043474
         },
@@ -2466,7 +2466,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 1.22,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 1.78,
@@ -2598,7 +2598,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 6.01,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 10.95,
@@ -2670,7 +2670,7 @@ window.DEMO_DATA = {
           "silence_segments": [
             {
               "end_sec": 1.77,
-              "start_sec": 0.0
+              "start_sec": 0
             },
             {
               "end_sec": 8.55,
@@ -2714,5 +2714,329 @@ window.DEMO_DATA = {
         }
       }
     }
-  ]
+  ],
+  "amiAnalysis": {
+    "title": "AMI EN2001a 切分与标注对比",
+    "splitLogic": {
+      "sourceScript": "scripts/prepare_ami_utterances.py",
+      "sourceMeeting": "EN2001a.Mix-Headset.wav",
+      "sourceAnnotation": "EN2001a.jsonl",
+      "minDurationSec": 10,
+      "targetDurationSec": 20,
+      "maxDurationSec": 30,
+      "endpointPaddingSec": 0.5,
+      "totalSegments": 195,
+      "durationSec": {
+        "min": 10.508,
+        "median": 22.98,
+        "mean": 26.31,
+        "max": 76.415
+      },
+      "utteranceCount": {
+        "min": 1,
+        "mean": 4.85,
+        "max": 15
+      },
+      "speakerCount": {
+        "min": 1,
+        "mean": 2.52,
+        "max": 5
+      },
+      "rules": [
+        "先把原始 utterance 标注合并成全局 speech activity 区间。",
+        "候选切分点只放在无说话人的间隙：开头 activity 前 0.5s、相邻 speech activity 的中点、最后 activity 后 0.5s。",
+        "用动态规划选择候选切分点，使每段尽量接近 20s，同时满足 10s 最小时长。",
+        "超过 30s 会被强惩罚，但如果长重叠/长 utterance 不可再切，仍允许保留长段。",
+        "每个切片保留 shifted utterances/words metadata，用于 deterministic VAD 和 speaker 标签。"
+      ]
+    },
+    "comparison": {
+      "phase2Label": "phase2 AMI 无原生标注输入",
+      "annotatedLabel": "ami_en2001a 有 utterance 标注输入",
+      "comparedSampleCount": 5,
+      "phase2Manifest": "phase2_asr_sample/manifest.jsonl",
+      "annotatedManifest": "ami_en2001a_utterances/manifest.jsonl",
+      "phase2Tags": "outputs/phase2_full_pipeline_topic_speaker_tags.jsonl",
+      "annotatedTags": "outputs/ami_en2001a_annotated_phase2_ami_tags.jsonl",
+      "samples": [
+        {
+          "sampleId": "EN2001a_utterance_00000",
+          "transcript": "'Kay. Gosh. Okay. 'Kay. Does anyone want to see uh Steve's feedback from the specification? Is there much more in it than he d I I dry-read it the last time.. Right. Is there much more in it than he said yesterday?",
+          "durationSec": 18.436,
+          "phase2": {
+            "row": 21,
+            "nativeMetadataKeys": [],
+            "vadRoute": "FireRed VAD fallback",
+            "speakerRoute": "MOSS diarize fallback",
+            "topicRoute": "OpenAI Responses",
+            "tags": {
+              "topic": "meeting_workflow/coordination",
+              "silenceRatio": 0.503688,
+              "silenceSegmentCount": 7,
+              "speaker": {
+                "multi_speaker": true,
+                "speaker_change": true,
+                "speaker_overlap": false
+              }
+            }
+          },
+          "annotated": {
+            "row": 1,
+            "nativeMetadataKeys": [
+              "audio_id",
+              "end",
+              "start",
+              "utterances"
+            ],
+            "vadRoute": "native_metadata_vad",
+            "speakerRoute": "native_metadata_diarizer",
+            "topicRoute": "OpenAI Responses",
+            "utteranceCount": 9,
+            "speakerCount": 3,
+            "speakers": [
+              "A",
+              "D",
+              "E"
+            ],
+            "tags": {
+              "topic": "meeting_workflow/coordination",
+              "silenceRatio": 0.424441,
+              "silenceSegmentCount": 6,
+              "speaker": {
+                "multi_speaker": true,
+                "speaker_change": true,
+                "speaker_overlap": true
+              }
+            }
+          },
+          "delta": {
+            "silenceRatio": -0.079247,
+            "topicChanged": false,
+            "speakerChanged": true
+          }
+        },
+        {
+          "sampleId": "EN2001a_utterance_00001",
+          "transcript": "Not really, um just what he's talking about, like duplication of effort and Mm. Hmm. Hmm? Like duplication of effort and stuff, and um yeah, he was saying that we should maybe uh think about having a prototype for week six, which is next week. Yeah. Next week.",
+          "durationSec": 20.084,
+          "phase2": {
+            "row": 22,
+            "nativeMetadataKeys": [],
+            "vadRoute": "FireRed VAD fallback",
+            "speakerRoute": "MOSS diarize fallback",
+            "topicRoute": "OpenAI Responses",
+            "tags": {
+              "topic": "meeting_workflow/coordination",
+              "silenceRatio": 0.294463,
+              "silenceSegmentCount": 10,
+              "speaker": {
+                "multi_speaker": true,
+                "speaker_change": true,
+                "speaker_overlap": true
+              }
+            }
+          },
+          "annotated": {
+            "row": 2,
+            "nativeMetadataKeys": [
+              "audio_id",
+              "end",
+              "start",
+              "utterances"
+            ],
+            "vadRoute": "native_metadata_vad",
+            "speakerRoute": "native_metadata_diarizer",
+            "topicRoute": "OpenAI Responses",
+            "utteranceCount": 5,
+            "speakerCount": 3,
+            "speakers": [
+              "A",
+              "D",
+              "E"
+            ],
+            "tags": {
+              "topic": "business_management/project_management",
+              "silenceRatio": 0.093856,
+              "silenceSegmentCount": 3,
+              "speaker": {
+                "multi_speaker": true,
+                "speaker_change": true,
+                "speaker_overlap": true
+              }
+            }
+          },
+          "delta": {
+            "silenceRatio": -0.200607,
+            "topicChanged": true,
+            "speakerChanged": false
+          }
+        },
+        {
+          "sampleId": "EN2001a_utterance_00003",
+          "transcript": "well go back first of all and look at NITE X_M_L_ to see in how far that that which we want is compatible with that which NITE X_M_L_ offers us. And then just sort of everyone make sure everyone understand the interface. Yeah.",
+          "durationSec": 14.1115,
+          "phase2": {
+            "row": 23,
+            "nativeMetadataKeys": [],
+            "vadRoute": "FireRed VAD fallback",
+            "speakerRoute": "MOSS diarize fallback",
+            "topicRoute": "OpenAI Responses",
+            "tags": {
+              "topic": "meeting_workflow/coordination",
+              "silenceRatio": 0.261595,
+              "silenceSegmentCount": 6,
+              "speaker": {
+                "multi_speaker": false,
+                "speaker_change": false,
+                "speaker_overlap": false
+              }
+            }
+          },
+          "annotated": {
+            "row": 4,
+            "nativeMetadataKeys": [
+              "audio_id",
+              "end",
+              "start",
+              "utterances"
+            ],
+            "vadRoute": "native_metadata_vad",
+            "speakerRoute": "native_metadata_diarizer",
+            "topicRoute": "OpenAI Responses",
+            "utteranceCount": 2,
+            "speakerCount": 2,
+            "speakers": [
+              "A",
+              "E"
+            ],
+            "tags": {
+              "topic": "technology_engineering/software_engineering",
+              "silenceRatio": 0.13489,
+              "silenceSegmentCount": 2,
+              "speaker": {
+                "multi_speaker": true,
+                "speaker_change": true,
+                "speaker_overlap": true
+              }
+            }
+          },
+          "delta": {
+            "silenceRatio": -0.126705,
+            "topicChanged": true,
+            "speakerChanged": true
+          }
+        },
+        {
+          "sampleId": "EN2001a_utterance_00005",
+          "transcript": "Hmm? The basic word importance is off-line as well. The combined measure might not be if we want to wait what the user has typed in into the search. Yeah. Okay. Okay.",
+          "durationSec": 17.5105,
+          "phase2": {
+            "row": 24,
+            "nativeMetadataKeys": [],
+            "vadRoute": "FireRed VAD fallback",
+            "speakerRoute": "MOSS diarize fallback",
+            "topicRoute": "OpenAI Responses",
+            "tags": {
+              "topic": "technology_engineering/software_engineering",
+              "silenceRatio": 0.450044,
+              "silenceSegmentCount": 6,
+              "speaker": {
+                "multi_speaker": true,
+                "speaker_change": true,
+                "speaker_overlap": true
+              }
+            }
+          },
+          "annotated": {
+            "row": 6,
+            "nativeMetadataKeys": [
+              "audio_id",
+              "end",
+              "start",
+              "utterances"
+            ],
+            "vadRoute": "native_metadata_vad",
+            "speakerRoute": "native_metadata_diarizer",
+            "topicRoute": "OpenAI Responses",
+            "utteranceCount": 5,
+            "speakerCount": 2,
+            "speakers": [
+              "C",
+              "E"
+            ],
+            "tags": {
+              "topic": "technology_engineering/artificial_intelligence",
+              "silenceRatio": 0.396305,
+              "silenceSegmentCount": 4,
+              "speaker": {
+                "multi_speaker": true,
+                "speaker_change": true,
+                "speaker_overlap": true
+              }
+            }
+          },
+          "delta": {
+            "silenceRatio": -0.053739,
+            "topicChanged": true,
+            "speakerChanged": false
+          }
+        },
+        {
+          "sampleId": "EN2001a_utterance_00006",
+          "transcript": "Uh mine's gonna be mostly using the off-line. But the actual stuff it's doing will be on-line. But it won't be very um processor intensive or memory intensive, I don't think. 'Kay. So basically apart from the display module, the i the display itself, we don't have an extremely high degree of interaction between sort of our modules that create the stuff and and the interface, so the interface is mainly while it's running just working on data that's just loaded from a file, I guess.",
+          "durationSec": 29.6035,
+          "phase2": {
+            "row": 25,
+            "nativeMetadataKeys": [],
+            "vadRoute": "FireRed VAD fallback",
+            "speakerRoute": "MOSS diarize fallback",
+            "topicRoute": "OpenAI Responses",
+            "tags": {
+              "topic": "technology_engineering/software_engineering",
+              "silenceRatio": 0.149763,
+              "silenceSegmentCount": 13,
+              "speaker": {
+                "multi_speaker": true,
+                "speaker_change": true,
+                "speaker_overlap": true
+              }
+            }
+          },
+          "annotated": {
+            "row": 7,
+            "nativeMetadataKeys": [
+              "audio_id",
+              "end",
+              "start",
+              "utterances"
+            ],
+            "vadRoute": "native_metadata_vad",
+            "speakerRoute": "native_metadata_diarizer",
+            "topicRoute": "OpenAI Responses",
+            "utteranceCount": 3,
+            "speakerCount": 2,
+            "speakers": [
+              "D",
+              "E"
+            ],
+            "tags": {
+              "topic": "technology_engineering/software_engineering",
+              "silenceRatio": 0.033797,
+              "silenceSegmentCount": 2,
+              "speaker": {
+                "multi_speaker": true,
+                "speaker_change": true,
+                "speaker_overlap": true
+              }
+            }
+          },
+          "delta": {
+            "silenceRatio": -0.115966,
+            "topicChanged": false,
+            "speakerChanged": false
+          }
+        }
+      ]
+    }
+  }
 };
