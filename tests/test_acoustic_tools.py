@@ -330,6 +330,63 @@ class AcousticToolsTest(unittest.TestCase):
             )
             self.assertEqual(client.call_count, 1)
 
+    def test_topic_prompt_ignores_sample_utterance_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = (
+                "We compare whether the NITE XML interface is compatible with "
+                "the current meeting annotation workflow."
+            )
+            base_record = make_record("missing.wav")
+            base_record["sample"]["text"]["transcript"] = transcript
+            base_record["sample"]["native_metadata"] = {}
+            annotated_record = json.loads(json.dumps(base_record))
+            annotated_record["sample"]["native_metadata"] = {
+                "utterances": [
+                    {
+                        "speaker": "E",
+                        "start": 0.0,
+                        "end": 4.0,
+                        "text": transcript,
+                    },
+                    {
+                        "speaker": "A",
+                        "start": 2.0,
+                        "end": 2.3,
+                        "text": "Yeah.",
+                    },
+                ]
+            }
+            output = {
+                "major_topic": "technology_engineering",
+                "minor_topic": "software_engineering",
+                "confidence": 0.82,
+                "topic_keywords": ["NITE XML", "interface"],
+                "proper_nouns": ["NITE XML"],
+                "reason_short": "The transcript discusses interface compatibility.",
+                "secondary_topics": [],
+            }
+
+            clients = []
+            for record in (base_record, annotated_record):
+                client = FakeTopicClient(output)
+                tag_sample_record(
+                    record,
+                    tmpdir,
+                    topic_config=TopicConfig(enabled=True, cache_enabled=False),
+                    topic_client=client,
+                    selected_tag_paths=["language_content.topic"],
+                )
+                clients.append(client)
+
+            plain_prompt = json.loads(clients[0].prompts[0])
+            annotated_prompt = json.loads(clients[1].prompts[0])
+            self.assertEqual(plain_prompt, annotated_prompt)
+            self.assertEqual(plain_prompt["context"]["target_granularity"], "sample")
+            self.assertNotIn(
+                "Do not borrow a substantive topic",
+                "\n".join(plain_prompt["rules"]),
+            )
+
     def test_topic_short_utterance_guard_skips_openai_responses_call(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             record = make_record("missing.wav")

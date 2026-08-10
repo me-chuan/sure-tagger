@@ -438,9 +438,8 @@ def run(record, context=None, config=None, client=None):
     context = context or {}
     text = _transcript(record)
     llm_text = text
-    target_granularity = _target_granularity(record, context)
     topic_context = dict(context)
-    topic_context.setdefault("target_granularity", target_granularity)
+    topic_context["target_granularity"] = "sample"
     topic_context.setdefault("evidence_scope", "sample")
     topic_context.setdefault("evidence_sample_count", 1)
 
@@ -520,19 +519,6 @@ def build_topic_prompt(taxonomy, transcript_text, context, dataset_metadata=None
         "Classify the target transcript; use context only as supporting evidence.",
         "Do not invent proper nouns.",
     ]
-    if context.get("target_granularity") == "utterance":
-        rules.extend(
-            [
-                (
-                    "For short acknowledgements, backchannels, fillers, or "
-                    "non-content speech, use other/insufficient_context."
-                ),
-                (
-                    "Do not borrow a substantive topic from context when the "
-                    "target utterance itself has no topical content."
-                ),
-            ]
-        )
     payload = {
         "task": "Classify an ASR transcript unit into one major_topic and one minor_topic.",
         "rules": rules,
@@ -798,15 +784,6 @@ def _transcript(record):
 
 def _dataset_metadata(record):
     return record.get("corpus", {}).get("native_metadata", {})
-
-
-def _target_granularity(record, context):
-    if context.get("target_granularity"):
-        return context["target_granularity"]
-    meta = record.get("sample", {}).get("native_metadata", {})
-    if meta.get("utt_id") or meta.get("utterances"):
-        return "utterance"
-    return "sample"
 
 
 def _is_non_content_utterance(text, config):
