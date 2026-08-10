@@ -34,6 +34,7 @@ const els = {
   transcriptText: document.querySelector("#transcriptText"),
   tagToolbar: document.querySelector("#tagToolbar"),
   tagGrid: document.querySelector("#tagGrid"),
+  inputJson: document.querySelector("#inputJson"),
   rawJson: document.querySelector("#rawJson"),
   datasetBars: document.querySelector("#datasetBars"),
   coverageBars: document.querySelector("#coverageBars"),
@@ -214,9 +215,41 @@ function renderActiveSample() {
     els.transcriptText.textContent = "该样本没有 transcript，语言层只保留空结果，主要展示声学与声场标签。";
   }
 
+  els.inputJson.textContent = JSON.stringify(buildInputRecord(sample), null, 2);
   els.rawJson.textContent = JSON.stringify(sample.tags, null, 2);
   renderTags(sample);
   loadWaveform(sample);
+}
+
+function buildInputRecord(sample) {
+  return {
+    corpus: {
+      dataset_name: sample.dataset,
+      source_urls: {
+        article: [],
+        github: [],
+        huggingface: [],
+        dataset_card: [],
+      },
+      native_metadata: {},
+    },
+    sample: {
+      sample_id: sample.sampleId,
+      audio: {
+        path: manifestAudioPath(sample),
+      },
+      text: {
+        transcript: sample.transcript || "",
+      },
+      native_metadata: sample.nativeMetadata || {},
+    },
+  };
+}
+
+function manifestAudioPath(sample) {
+  const path = sample.audio || "";
+  if (path.startsWith("assets/")) return path.slice("assets/".length);
+  return path;
 }
 
 function renderTags(sample) {
