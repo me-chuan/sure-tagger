@@ -17,6 +17,7 @@
       </div>
       <nav class="topnav" aria-label="页面导航">
         <a href="#workflow">流程</a>
+        <a href="#ami-analysis">AMI</a>
         <a href="#samples">样本</a>
         <a href="#coverage">覆盖</a>
       </nav>
@@ -56,6 +57,32 @@
             <span class="step-index">04</span>
             <h3>Unified Tags</h3>
             <p>输出按 tag group 组织的 JSON，speaker 标签优先使用 utterance metadata，缺失时再退回 MOSS diarize。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="ami-band" id="ami-analysis" aria-labelledby="ami-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">AMI Analysis</p>
+            <h2 id="ami-title">EN2001a 切分与标注来源对比</h2>
+          </div>
+        </div>
+        <div class="ami-layout">
+          <article class="ami-panel">
+            <h3>切分逻辑</h3>
+            <div class="ami-metrics" id="amiSplitMetrics"></div>
+            <ol class="ami-steps" id="amiSplitSteps"></ol>
+          </article>
+          <article class="ami-panel">
+            <div class="ami-panel-header">
+              <div>
+                <h3>phase2 无标注 vs ami_en2001a 有标注</h3>
+                <p>同一批 AMI 音频，比较无 native metadata 输入和带 utterance metadata 输入下的标签差异。</p>
+              </div>
+            </div>
+            <div class="ami-tabs" id="amiCompareTabs" aria-label="AMI 对比样本"></div>
+            <div class="ami-compare-detail" id="amiCompareDetail"></div>
           </article>
         </div>
       </section>

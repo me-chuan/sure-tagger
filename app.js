@@ -4,6 +4,7 @@ const state = {
   filter: "all",
   activeId: data.samples[0]?.sampleId,
   tagGroup: "overview",
+  activeAmiId: data.amiAnalysis?.comparison?.samples?.[0]?.sampleId,
 };
 
 const tagGroups = [
@@ -36,6 +37,10 @@ const els = {
   tagGrid: document.querySelector("#tagGrid"),
   inputJson: document.querySelector("#inputJson"),
   rawJson: document.querySelector("#rawJson"),
+  amiSplitMetrics: document.querySelector("#amiSplitMetrics"),
+  amiSplitSteps: document.querySelector("#amiSplitSteps"),
+  amiCompareTabs: document.querySelector("#amiCompareTabs"),
+  amiCompareDetail: document.querySelector("#amiCompareDetail"),
   datasetBars: document.querySelector("#datasetBars"),
   coverageBars: document.querySelector("#coverageBars"),
 };
@@ -48,6 +53,7 @@ function init() {
   renderFilters();
   renderSampleList();
   renderTagToolbar();
+  renderAmiAnalysis();
   renderBars();
   renderActiveSample();
   setupWaveformEvents();
@@ -194,6 +200,153 @@ function renderTagToolbar() {
       renderTags(getActiveSample());
     });
   });
+}
+
+function renderAmiAnalysis() {
+  const analysis = data.amiAnalysis;
+  if (!analysis || !els.amiSplitMetrics || !els.amiSplitSteps) return;
+  const split = analysis.splitLogic;
+  const comparison = analysis.comparison;
+
+  els.amiSplitMetrics.innerHTML = [
+    ["切片总数", split.totalSegments, `${split.sourceMeeting}`],
+    ["目标时长", `${split.targetDurationSec}s`, `${split.minDurationSec}-${split.maxDurationSec}s 软约束`],
+    ["时长分布", `${split.durationSec.median}s`, `min ${split.durationSec.min}s / mean ${split.durationSec.mean}s / max ${split.durationSec.max}s`],
+    ["说话人", `${split.speakerCount.mean}`, `每段 speaker 数均值，范围 ${split.speakerCount.min}-${split.speakerCount.max}`],
+  ]
+    .map(
+      ([label, value, caption]) => `
+        <div class="ami-mini-metric">
+          <p>${escapeHtml(label)}</p>
+          <strong>${escapeHtml(value)}</strong>
+          <span>${escapeHtml(caption)}</span>
+        </div>
+      `,
+    )
+    .join("");
+
+  els.amiSplitSteps.innerHTML = split.rules
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join("");
+
+  if (!state.activeAmiId && comparison.samples.length) {
+    state.activeAmiId = comparison.samples[0].sampleId;
+  }
+  renderAmiCompareTabs(comparison);
+  renderAmiCompareDetail(comparison);
+}
+
+function renderAmiCompareTabs(comparison) {
+  els.amiCompareTabs.innerHTML = comparison.samples
+    .map((sample) => {
+      const active = sample.sampleId === state.activeAmiId ? "is-active" : "";
+      return `
+        <button type="button" class="${active}" data-ami-sample="${escapeAttr(sample.sampleId)}">
+          ${escapeHtml(shortAmiId(sample.sampleId))}
+        </button>
+      `;
+    })
+    .join("");
+  els.amiCompareTabs.querySelectorAll("button").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeAmiId = button.dataset.amiSample;
+      renderAmiCompareTabs(comparison);
+      renderAmiCompareDetail(comparison);
+    });
+  });
+}
+
+function renderAmiCompareDetail(comparison) {
+  const sample =
+    comparison.samples.find((item) => item.sampleId === state.activeAmiId) ||
+    comparison.samples[0];
+  if (!sample) return;
+
+  const phase = sample.phase2;
+  const annotated = sample.annotated;
+  const phaseSilence = phase.tags.silenceRatio ?? 0;
+  const annotatedSilence = annotated.tags.silenceRatio ?? 0;
+  const maxSilence = Math.max(phaseSilence, annotatedSilence, 0.01);
+
+  els.amiCompareDetail.innerHTML = `
+    <div class="ami-sample-head">
+      <div>
+        <p class="eyebrow">${escapeHtml(sample.sampleId)}</p>
+        <h4>${escapeHtml(topicComparisonText(sample))}</h4>
+      </div>
+      <div class="ami-delta ${sample.delta.speakerChanged ? "is-different" : ""}">
+        ${sample.delta.speakerChanged ? "speaker differs" : "speaker same"}
+      </div>
+    </div>
+    <p class="ami-transcript">${escapeHtml(sample.transcript)}</p>
+    <div class="ami-compare-grid">
+      ${renderAmiSourceCard(comparison.phase2Label, phase, "phase2")}
+      ${renderAmiSourceCard(comparison.annotatedLabel, annotated, "annotated")}
+    </div>
+    <div class="ami-bars">
+      <div class="ami-bar-row">
+        <span>${escapeHtml(comparison.phase2Label)}</span>
+        <div class="ami-bar-track">
+          <div class="ami-bar-fill" style="width:${Math.round((phaseSilence / maxSilence) * 100)}%"></div>
+        </div>
+        <strong>${formatPercent(phase.tags.silenceRatio)}</strong>
+      </div>
+      <div class="ami-bar-row">
+        <span>${escapeHtml(comparison.annotatedLabel)}</span>
+        <div class="ami-bar-track">
+          <div class="ami-bar-fill annotated" style="width:${Math.round((annotatedSilence / maxSilence) * 100)}%"></div>
+        </div>
+        <strong>${formatPercent(annotated.tags.silenceRatio)}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function renderAmiSourceCard(label, source, kind) {
+  const speaker = source.tags.speaker || {};
+  const metadata = kind === "annotated"
+    ? `${source.utteranceCount} utterance(s), ${source.speakerCount} speaker(s): ${source.speakers.join(", ")}`
+    : "native_metadata 为空，VAD/speaker 退回模型";
+  return `
+    <section class="ami-source">
+      <h4>${escapeHtml(label)}</h4>
+      <dl>
+        <dt>metadata</dt>
+        <dd>${escapeHtml(metadata)}</dd>
+        <dt>VAD route</dt>
+        <dd>${escapeHtml(source.vadRoute)}</dd>
+        <dt>speaker route</dt>
+        <dd>${escapeHtml(source.speakerRoute)}</dd>
+        <dt>topic</dt>
+        <dd>${escapeHtml(source.tags.topic || "null")}</dd>
+        <dt>silence</dt>
+        <dd>${formatPercent(source.tags.silenceRatio)} / ${source.tags.silenceSegmentCount ?? 0} segment(s)</dd>
+        <dt>speaker flags</dt>
+        <dd>${flagBadges(speaker)}</dd>
+      </dl>
+    </section>
+  `;
+}
+
+function topicComparisonText(sample) {
+  if (sample.delta.topicChanged) {
+    return `topic changed: ${sample.phase2.tags.topic || "null"} -> ${sample.annotated.tags.topic || "null"}`;
+  }
+  return `topic stable: ${sample.annotated.tags.topic || "null"}`;
+}
+
+function shortAmiId(sampleId) {
+  return sampleId.replace("EN2001a_utterance_", "#");
+}
+
+function flagBadges(speaker) {
+  return ["multi_speaker", "speaker_change", "speaker_overlap"]
+    .map((key) => {
+      const value = speaker[key];
+      const cls = value === true ? "yes" : value === false ? "no" : "null";
+      return `<span class="ami-flag ${cls}">${key}: ${value === null || value === undefined ? "null" : value}</span>`;
+    })
+    .join("");
 }
 
 function renderActiveSample() {
@@ -523,6 +676,14 @@ function drawWaveform(current) {
 
 function escapeAttr(value) {
   return String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 init();
