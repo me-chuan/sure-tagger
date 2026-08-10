@@ -481,7 +481,14 @@ audio {
   color: #8a3939;
 }
 
+.json-panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .json-panel {
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfcf8;
@@ -590,7 +597,8 @@ audio {
   }
 
   .workspace,
-  .coverage-grid {
+  .coverage-grid,
+  .json-panels {
     grid-template-columns: 1fr;
   }
 
