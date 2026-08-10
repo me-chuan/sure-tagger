@@ -271,7 +271,7 @@ function renderAmiCompareDetail(comparison) {
   els.amiCompareDetail.innerHTML = `
     <div class="ami-sample-head">
       <div>
-        <p class="eyebrow">${escapeHtml(sample.sampleId)}</p>
+        <p class="eyebrow">${escapeHtml(amiExampleLabel(sample.sampleId))}</p>
         <h4>${escapeHtml(topicComparisonText(sample))}</h4>
       </div>
       <div class="ami-delta ${sample.delta.speakerChanged ? "is-different" : ""}">
@@ -337,6 +337,10 @@ function topicComparisonText(sample) {
 
 function shortAmiId(sampleId) {
   return sampleId.replace("EN2001a_utterance_", "#");
+}
+
+function amiExampleLabel(sampleId) {
+  return `AMI 示例 ${shortAmiId(sampleId)}`;
 }
 
 function flagBadges(speaker) {

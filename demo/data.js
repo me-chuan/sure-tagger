@@ -2716,11 +2716,11 @@ window.DEMO_DATA = {
     }
   ],
   "amiAnalysis": {
-    "title": "AMI EN2001a 切分与标注对比",
+    "title": "AMI 切分与有无标注对比",
     "splitLogic": {
       "sourceScript": "scripts/prepare_ami_utterances.py",
-      "sourceMeeting": "EN2001a.Mix-Headset.wav",
-      "sourceAnnotation": "EN2001a.jsonl",
+      "sourceMeeting": "AMI 示例会议",
+      "sourceAnnotation": "AMI utterance annotation",
       "minDurationSec": 10,
       "targetDurationSec": 20,
       "maxDurationSec": 30,
@@ -2751,8 +2751,8 @@ window.DEMO_DATA = {
       ]
     },
     "comparison": {
-      "phase2Label": "phase2 AMI 无原生标注输入",
-      "annotatedLabel": "ami_en2001a 有 utterance 标注输入",
+      "phase2Label": "AMI 无原生标注输入",
+      "annotatedLabel": "AMI 有 utterance 标注输入",
       "comparedSampleCount": 5,
       "phase2Manifest": "phase2_asr_sample/manifest.jsonl",
       "annotatedManifest": "ami_en2001a_utterances/manifest.jsonl",
