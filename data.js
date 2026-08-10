@@ -1499,7 +1499,7 @@ window.DEMO_DATA = {
       "sampleId": "EN2001a_utterance_00003",
       "dataset": "AMI",
       "title": "Meeting speech: technical talk",
-      "note": "Phase2 sample with supplemented topic=meeting_workflow/coordination and speaker flags multi/change/overlap=False/False/False.",
+      "note": "Phase2 sample with supplemented topic=technology_engineering/software_engineering and speaker flags multi/change/overlap=False/False/False.",
       "audio": "assets/audio/ami_EN2001a_utterance_00003.wav",
       "transcript": "well go back first of all and look at NITE X_M_L_ to see in how far that that which we want is compatible with that which NITE X_M_L_ offers us. And then just sort of everyone make sure everyone understand the interface. Yeah.",
       "nativeMetadata": {},
@@ -1554,7 +1554,7 @@ window.DEMO_DATA = {
             "has_repetition": true,
             "repetition_count": 1
           },
-          "topic": "meeting_workflow/coordination",
+          "topic": "technology_engineering/software_engineering",
           "word_count": 47
         },
         "sound_field_scene": {
@@ -1579,7 +1579,7 @@ window.DEMO_DATA = {
       "sampleId": "EN2001a_utterance_00005",
       "dataset": "AMI",
       "title": "Meeting speech: short turns",
-      "note": "Phase2 sample with supplemented topic=technology_engineering/software_engineering and speaker flags multi/change/overlap=True/True/True.",
+      "note": "Phase2 sample with supplemented topic=technology_engineering/artificial_intelligence and speaker flags multi/change/overlap=True/True/True.",
       "audio": "assets/audio/ami_EN2001a_utterance_00005.wav",
       "transcript": "Hmm? The basic word importance is off-line as well. The combined measure might not be if we want to wait what the user has typed in into the search. Yeah. Okay. Okay.",
       "nativeMetadata": {},
@@ -1634,7 +1634,7 @@ window.DEMO_DATA = {
             "has_repetition": true,
             "repetition_count": 1
           },
-          "topic": "technology_engineering/software_engineering",
+          "topic": "technology_engineering/artificial_intelligence",
           "word_count": 33
         },
         "sound_field_scene": {
@@ -2756,8 +2756,8 @@ window.DEMO_DATA = {
       "comparedSampleCount": 5,
       "phase2Manifest": "phase2_asr_sample/manifest.jsonl",
       "annotatedManifest": "ami_en2001a_utterances/manifest.jsonl",
-      "phase2Tags": "outputs/phase2_full_pipeline_topic_speaker_tags.jsonl",
-      "annotatedTags": "outputs/ami_en2001a_annotated_phase2_ami_tags.jsonl",
+      "phase2Tags": "outputs/phase2_ami_unified_topic_tags.jsonl",
+      "annotatedTags": "outputs/ami_en2001a_unified_topic_tags.jsonl",
       "samples": [
         {
           "sampleId": "EN2001a_utterance_00000",
@@ -2855,7 +2855,7 @@ window.DEMO_DATA = {
               "E"
             ],
             "tags": {
-              "topic": "business_management/project_management",
+              "topic": "meeting_workflow/coordination",
               "silenceRatio": 0.093856,
               "silenceSegmentCount": 3,
               "speaker": {
@@ -2867,7 +2867,7 @@ window.DEMO_DATA = {
           },
           "delta": {
             "silenceRatio": -0.200607,
-            "topicChanged": true,
+            "topicChanged": false,
             "speakerChanged": false
           }
         },
@@ -2882,7 +2882,7 @@ window.DEMO_DATA = {
             "speakerRoute": "MOSS diarize fallback",
             "topicRoute": "OpenAI Responses",
             "tags": {
-              "topic": "meeting_workflow/coordination",
+              "topic": "technology_engineering/software_engineering",
               "silenceRatio": 0.261595,
               "silenceSegmentCount": 6,
               "speaker": {
@@ -2922,7 +2922,7 @@ window.DEMO_DATA = {
           },
           "delta": {
             "silenceRatio": -0.126705,
-            "topicChanged": true,
+            "topicChanged": false,
             "speakerChanged": true
           }
         },
@@ -2937,7 +2937,7 @@ window.DEMO_DATA = {
             "speakerRoute": "MOSS diarize fallback",
             "topicRoute": "OpenAI Responses",
             "tags": {
-              "topic": "technology_engineering/software_engineering",
+              "topic": "technology_engineering/artificial_intelligence",
               "silenceRatio": 0.450044,
               "silenceSegmentCount": 6,
               "speaker": {
@@ -2977,7 +2977,7 @@ window.DEMO_DATA = {
           },
           "delta": {
             "silenceRatio": -0.053739,
-            "topicChanged": true,
+            "topicChanged": false,
             "speakerChanged": false
           }
         },
