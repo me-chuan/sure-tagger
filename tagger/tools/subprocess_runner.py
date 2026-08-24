@@ -3,7 +3,10 @@
 import json
 import os
 from pathlib import Path
+import select
 import subprocess
+import threading
+import time
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +20,8 @@ class JsonSubprocessWorker:
     def __init__(self, python_executable, tool_name):
         self.python_executable = _resolve_python_executable(python_executable)
         self.tool_name = tool_name
+        self.broken = False
+        self._lock = threading.Lock()
         env = os.environ.copy()
         pythonpath = str(PROJECT_ROOT)
         if env.get("PYTHONPATH"):
@@ -38,14 +43,28 @@ class JsonSubprocessWorker:
             bufsize=1,
         )
 
-    def call(self, request):
+    def call(self, request, timeout_sec=None):
+        # A worker owns one stdin/stdout JSONL stream. Calls may arrive from
+        # parallel sample tasks, but each request/response pair must remain
+        # ordered on that stream.
+        with self._lock:
+            return self._call_locked(request, timeout_sec=timeout_sec)
+
+    def _call_locked(self, request, timeout_sec=None):
         if self.process.poll() is not None:
+            self.broken = True
             raise SubprocessToolError(
                 "subprocess worker exited before request: %s" % self.tool_name
             )
         self.process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
         self.process.stdin.flush()
-        response = self._read_response()
+        deadline = None
+        if timeout_sec is not None:
+            timeout_sec = float(timeout_sec)
+            if timeout_sec <= 0:
+                raise ValueError("subprocess timeout must be positive")
+            deadline = time.monotonic() + timeout_sec
+        response = self._read_response(deadline)
         if response.get("status") != "ok":
             message = response.get("message") or "subprocess tool failed"
             error_type = response.get("error_type")
@@ -55,24 +74,45 @@ class JsonSubprocessWorker:
         return response.get("result")
 
     def close(self):
-        if self.process.poll() is not None:
-            return
-        try:
-            self.process.stdin.write(json.dumps({"_command": "close"}) + "\n")
-            self.process.stdin.flush()
-            self.process.stdin.close()
-        except Exception:
-            pass
-        try:
-            self.process.wait(timeout=5)
-        except Exception:
-            self.process.terminate()
+        with self._lock:
+            if self.process.poll() is not None:
+                return
+            try:
+                self.process.stdin.write(json.dumps({"_command": "close"}) + "\n")
+                self.process.stdin.flush()
+                self.process.stdin.close()
+            except Exception:
+                pass
+            try:
+                self.process.wait(timeout=5)
+            except Exception:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=2)
+                except Exception:
+                    self.process.kill()
 
-    def _read_response(self):
+    def _read_response(self, deadline=None):
         noise = []
         while True:
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._mark_broken()
+                    raise SubprocessToolError(
+                        "subprocess worker timed out for %s" % self.tool_name
+                    )
+                readable, _writable, _exceptional = select.select(
+                    [self.process.stdout], [], [], remaining
+                )
+                if not readable:
+                    self._mark_broken()
+                    raise SubprocessToolError(
+                        "subprocess worker timed out for %s" % self.tool_name
+                    )
             line = self.process.stdout.readline()
             if not line:
+                self.broken = True
                 code = self.process.poll()
                 raise SubprocessToolError(
                     "subprocess worker produced no JSON response for %s; "
@@ -89,30 +129,67 @@ class JsonSubprocessWorker:
                 return response
             noise.append(stripped)
 
+    def _mark_broken(self):
+        self.broken = True
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=2)
+            except Exception:
+                self.process.kill()
 
-def run_subprocess_tool(python_executable, tool_name, request, context=None):
+
+def run_subprocess_tool(
+    python_executable,
+    tool_name,
+    request,
+    context=None,
+    timeout_sec=None,
+):
     if not python_executable:
         raise SubprocessToolError("subprocess python is not configured")
     if context is None:
         worker = JsonSubprocessWorker(python_executable, tool_name)
         try:
-            return worker.call(request)
+            return worker.call(request, timeout_sec=timeout_sec)
         finally:
             worker.close()
 
-    workers = context.setdefault("_subprocess_workers", {})
     key = (_resolve_python_executable(python_executable), tool_name)
-    if key not in workers:
-        workers[key] = JsonSubprocessWorker(python_executable, tool_name)
-    return workers[key].call(request)
+    workers_lock = context.setdefault("_subprocess_workers_lock", threading.Lock())
+    with workers_lock:
+        workers = context.setdefault("_subprocess_workers", {})
+        worker_pool = workers.setdefault(key, [])
+        slots_by_tool = context.get("_subprocess_worker_slots", {})
+        slots = max(1, int(slots_by_tool.get(tool_name, 1)))
+        while len(worker_pool) < slots:
+            worker_pool.append(JsonSubprocessWorker(python_executable, tool_name))
+        # Round-robin requests across the pool. Each worker keeps its own
+        # ordered JSON stream, and the per-worker lock protects that stream.
+        next_by_key = context.setdefault("_subprocess_worker_next", {})
+        index = int(next_by_key.get(key, 0)) % len(worker_pool)
+        next_by_key[key] = index + 1
+        worker = worker_pool[index]
+    try:
+        return worker.call(request, timeout_sec=timeout_sec)
+    except Exception:
+        if worker.broken:
+            with workers_lock:
+                pool = workers.get(key, [])
+                workers[key] = [item for item in pool if item is not worker]
+            worker.close()
+        raise
 
 
 def close_subprocess_workers(context):
     if not context:
         return
-    workers = context.pop("_subprocess_workers", {})
-    for worker in workers.values():
-        worker.close()
+    workers_lock = context.setdefault("_subprocess_workers_lock", threading.Lock())
+    with workers_lock:
+        workers = context.pop("_subprocess_workers", {})
+    for pool in workers.values():
+        for worker in pool:
+            worker.close()
 
 
 def _resolve_python_executable(python_executable):

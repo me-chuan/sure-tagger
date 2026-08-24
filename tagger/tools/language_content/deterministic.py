@@ -20,17 +20,19 @@ FILLER_TOOL_VERSION = "filler_v0.1.0"
 DEFAULT_FILLERS = set(["uh", "um", "erm", "er", "ah", "oh", "hmm", "mm", "yeah"])
 
 
-def run_all(transcript, config=None):
-    # type: (str, object) -> list
+def run_all(transcript, config=None, include_language=False):
+    # type: (str, object, bool) -> list
     config = config or {}
     text = transcript or ""
-    return [
-        detect_language(text, config.get("language", {})),
+    results = [
         count_words(text, config.get("word_count", {})),
         count_punctuation(text),
         detect_repetition(text, config.get("repetition", {})),
         count_fillers(text, config.get("filler", {})),
     ]
+    if include_language:
+        results.insert(0, detect_language(text, config.get("language", {})))
+    return results
 
 
 def detect_language(text, config=None):

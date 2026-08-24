@@ -43,8 +43,12 @@ def dispatch(tool_name, request):
         return _run_firered_vad_detect(request)
     if tool_name == "firered_aed_detect":
         return _run_firered_aed_detect(request)
+    if tool_name == "firered_lid_detect":
+        return _run_firered_lid_detect(request)
     if tool_name == "panns_background_estimate":
         return _run_panns_background_estimate(request)
+    if tool_name == "dass_noise_type_estimate":
+        return _run_dass_noise_type_estimate(request)
     if tool_name == "brouhaha_estimate":
         return _run_brouhaha_estimate(request)
     if tool_name == "dnsmos_estimate":
@@ -53,6 +57,16 @@ def dispatch(tool_name, request):
         return _run_recrir_estimate(request)
     if tool_name == "moss_diarize_estimate":
         return _run_moss_diarize_estimate(request)
+    if tool_name == "campplus_identity_estimate":
+        return _run_campplus_identity_estimate(request)
+    if tool_name == "ecapa_identity_estimate":
+        return _run_ecapa_identity_estimate(request)
+    if tool_name == "whisper_lexical_estimate":
+        return _run_whisper_lexical_estimate(request)
+    if tool_name == "sortformer_timeline_estimate":
+        return _run_sortformer_timeline_estimate(request)
+    if tool_name == "pyannote_community1_estimate":
+        return _run_pyannote_community1_estimate(request)
     raise ValueError("unknown subprocess tool: %s" % tool_name)
 
 
@@ -93,6 +107,27 @@ def _run_firered_aed_detect(request):
     }
 
 
+def _run_firered_lid_detect(request):
+    from tagger.tools.language_content.firered_lid_detector import (
+        FireRedLidClient,
+        FireRedLidConfig,
+    )
+
+    config = FireRedLidConfig(**request["config"])
+    client = _cached_client(
+        "firered_lid_detect",
+        request["config"],
+        FireRedLidClient,
+        config,
+    )
+    return {
+        "output": client.detect_language(
+            request["audio_path"],
+            context=None,
+        )
+    }
+
+
 def _run_panns_background_estimate(request):
     from tagger.tools.sound_field_scene.panns_background_detector import (
         PannsBackgroundClient,
@@ -109,8 +144,24 @@ def _run_panns_background_estimate(request):
     return {"output": client.estimate(request["audio_path"], context=None)}
 
 
+def _run_dass_noise_type_estimate(request):
+    from tagger.tools.sound_field_scene.dass_noise_type_detector import (
+        DassNoiseTypeClient,
+        DassNoiseTypeConfig,
+    )
+
+    config = DassNoiseTypeConfig(**request["config"])
+    client = _cached_client(
+        "dass_noise_type_estimate",
+        request["config"],
+        DassNoiseTypeClient,
+        config,
+    )
+    return {"output": client.estimate(request["audio_path"], context=None)}
+
+
 def _run_brouhaha_estimate(request):
-    from tagger.tools.basic_acoustic.brouhaha_signal_estimator import (
+    from tagger.tools.audio_quality.brouhaha_signal_estimator import (
         BrouhahaClient,
         BrouhahaConfig,
     )
@@ -121,7 +172,7 @@ def _run_brouhaha_estimate(request):
 
 
 def _run_recrir_estimate(request):
-    from tagger.tools.sound_field_scene.rir_estimator import RecRirClient, RecRirConfig
+    from tagger.tools.room_acoustic.rir_estimator import RecRirClient, RecRirConfig
 
     config = RecRirConfig(**request["config"])
     client = _cached_client("recrir_estimate", request["config"], RecRirClient, config)
@@ -129,7 +180,7 @@ def _run_recrir_estimate(request):
 
 
 def _run_dnsmos_estimate(request):
-    from tagger.tools.basic_acoustic.dnsmos_quality_estimator import (
+    from tagger.tools.audio_quality.dnsmos_quality_estimator import (
         DnsmosClient,
         DnsmosConfig,
     )
@@ -153,6 +204,98 @@ def _run_moss_diarize_estimate(request):
         config,
     )
     return {"output": client.diarize(request["audio_path"], context=None)}
+
+
+def _run_campplus_identity_estimate(request):
+    from tagger.tools.speaker_v2.campplus_identity import (
+        CampPlusIdentityClient,
+        CampPlusIdentityConfig,
+    )
+
+    config = CampPlusIdentityConfig(**request["config"])
+    client = _cached_client(
+        "campplus_identity_estimate",
+        request["config"],
+        CampPlusIdentityClient,
+        config,
+    )
+    return {
+        "output": client.compare_regions(
+            request["audio_path"],
+            request["regions"],
+        )
+    }
+
+
+def _run_ecapa_identity_estimate(request):
+    from tagger.tools.speaker_v2.ecapa_identity import (
+        EcapaIdentityClient,
+        EcapaIdentityConfig,
+        validate_subprocess_request,
+    )
+
+    validate_subprocess_request(request)
+    config = EcapaIdentityConfig(**request["config"])
+    client = _cached_client(
+        "ecapa_identity_estimate",
+        request["config"],
+        EcapaIdentityClient,
+        config,
+    )
+    return {
+        "output": client.compare_regions(
+            request["audio_path"],
+            request["regions"],
+        )
+    }
+
+
+def _run_whisper_lexical_estimate(request):
+    from tagger.tools.speaker_v2.whisper_lexical import (
+        WhisperLexicalClient,
+        WhisperLexicalConfig,
+    )
+
+    config = WhisperLexicalConfig(**request["config"])
+    client = _cached_client(
+        "whisper_lexical_estimate",
+        request["config"],
+        WhisperLexicalClient,
+        config,
+    )
+    return {"output": client.transcribe(request["audio_path"])}
+
+
+def _run_sortformer_timeline_estimate(request):
+    from tagger.tools.speaker_v2.sortformer_timeline import (
+        SortformerTimelineClient,
+        SortformerTimelineConfig,
+    )
+
+    config = SortformerTimelineConfig(**request["config"])
+    client = _cached_client(
+        "sortformer_timeline_estimate",
+        request["config"],
+        SortformerTimelineClient,
+        config,
+    )
+    return {"output": client.diarize(request["audio_path"])}
+
+
+def _run_pyannote_community1_estimate(request):
+    from tagger.tools.speaker_v2.pyannote_community1 import (
+        PyannoteCommunity1Client,
+        PyannoteCommunity1Config,
+    )
+
+    config = PyannoteCommunity1Config(**request["config"])
+    client = _cached_client(
+        "pyannote_community1_estimate",
+        request["config"],
+        PyannoteCommunity1Client,
+        config,
+    )
+    return {"output": client.diarize(request["audio_path"])}
 
 
 def _cached_client(tool_name, config_record, client_class, config):

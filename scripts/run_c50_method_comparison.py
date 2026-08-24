@@ -2,8 +2,8 @@
 """Compare C50 estimates from Brouhaha and Rec-RIR.
 
 This diagnostic script is not the public tags-only pipeline. The public
-`basic_acoustic.c50` field remains Brouhaha-backed, while
-`sound_field_scene.c50` remains derived from a Rec-RIR room impulse response.
+`room_acoustic.c50_db` field remains derived from a Rec-RIR room impulse
+response, while Brouhaha C50 is internal evidence (`internal.brouhaha_c50_db`).
 """
 
 from pathlib import Path
@@ -22,16 +22,16 @@ from tagger.pipelines.tagging import (  # noqa: E402
     write_rir_artifact,
 )
 from tagger.tools.acoustic_io import get_audio_info  # noqa: E402
-from tagger.tools.basic_acoustic.brouhaha_signal_estimator import (  # noqa: E402
+from tagger.tools.audio_quality.brouhaha_signal_estimator import (  # noqa: E402
     TOOL_NAME as BROUHAHA_TOOL_NAME,
     BrouhahaConfig,
     run as run_brouhaha_signal_estimator,
 )
-from tagger.tools.sound_field_scene.c50_estimator import (  # noqa: E402
+from tagger.tools.room_acoustic.c50_estimator import (  # noqa: E402
     TOOL_NAME as RECRIR_C50_TOOL_NAME,
     run as run_recrir_c50_estimator,
 )
-from tagger.tools.sound_field_scene.rir_estimator import (  # noqa: E402
+from tagger.tools.room_acoustic.rir_estimator import (  # noqa: E402
     TOOL_NAME as RECRIR_RIR_TOOL_NAME,
     METHOD as RECRIR_METHOD,
     RecRirConfig,
@@ -129,12 +129,12 @@ def compare_record(
         "sample_rate_hz": None,
         "channels": None,
         "brouhaha": _empty_c50_result(
-            tag_path="basic_acoustic.c50",
+            tag_path="internal.brouhaha_c50_db",
             tool_name=BROUHAHA_TOOL_NAME,
             method="Brouhaha",
         ),
         "recrir": _empty_c50_result(
-            tag_path="sound_field_scene.c50",
+            tag_path="room_acoustic.c50_db",
             tool_name=RECRIR_C50_TOOL_NAME,
             method="%s_clarity_c50" % RECRIR_METHOD,
         ),
@@ -183,7 +183,7 @@ def compare_record(
 
 def _run_brouhaha_c50(audio_path, context, config, client, warnings):
     result = _empty_c50_result(
-        tag_path="basic_acoustic.c50",
+        tag_path="internal.brouhaha_c50_db",
         tool_name=BROUHAHA_TOOL_NAME,
         method="Brouhaha",
     )
@@ -206,10 +206,10 @@ def _run_brouhaha_c50(audio_path, context, config, client, warnings):
         )
         return result
 
-    c50_result = _find_result(tool_results, "basic_acoustic.c50")
+    c50_result = _find_result(tool_results, "internal.brouhaha_c50_db")
     if c50_result is None:
         result["status"] = "failed"
-        result["error"] = "Brouhaha did not return basic_acoustic.c50"
+        result["error"] = "Brouhaha did not return internal.brouhaha_c50_db"
         warnings.append(
             {
                 "type": "brouhaha_c50_missing",
@@ -241,7 +241,7 @@ def _run_recrir_c50(
     sample_key,
 ):
     result = _empty_c50_result(
-        tag_path="sound_field_scene.c50",
+        tag_path="room_acoustic.c50_db",
         tool_name=RECRIR_C50_TOOL_NAME,
         method="%s_clarity_c50" % RECRIR_METHOD,
     )

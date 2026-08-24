@@ -90,8 +90,8 @@ class FireRedAedConfig:
             {
                 "supported_sample_rate_hz": SUPPORTED_SAMPLE_RATE_HZ,
                 "public_mapping": {
-                    "audio_events": "detected event names in model class order",
-                    "music": "music event present",
+                    "speech_music_events": "detected event names in model class order",
+                    "music_present": "music event present",
                 },
                 "subprocess_python": self.subprocess_python,
             }
@@ -210,8 +210,8 @@ def run(audio_path, duration_sec, context=None, config=None, client=None, **_kwa
 
     audio_events = [name for name in EVENT_NAMES if event_segments[name]]
     values = {
-        "sound_field_scene.audio_events": audio_events,
-        "sound_field_scene.music": "music" in audio_events,
+        "sound_field_scene.speech_music_events": audio_events,
+        "sound_field_scene.music_present": "music" in audio_events,
     }
     evidence = {
         "config": config.to_record(),

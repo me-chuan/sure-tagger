@@ -4,12 +4,13 @@ const state = {
   filter: "all",
   activeId: data.samples[0]?.sampleId,
   tagGroup: "overview",
-  activeAmiId: data.amiAnalysis?.comparison?.samples?.[0]?.sampleId,
 };
 
 const tagGroups = [
   ["overview", "Overview"],
   ["basic_acoustic", "Basic acoustic"],
+  ["audio_quality", "Audio quality"],
+  ["room_acoustic", "Room acoustic"],
   ["sound_field_scene", "Sound field"],
   ["language_content", "Language"],
   ["speaker", "Speaker"],
@@ -37,10 +38,6 @@ const els = {
   tagGrid: document.querySelector("#tagGrid"),
   inputJson: document.querySelector("#inputJson"),
   rawJson: document.querySelector("#rawJson"),
-  amiSplitMetrics: document.querySelector("#amiSplitMetrics"),
-  amiSplitSteps: document.querySelector("#amiSplitSteps"),
-  amiCompareTabs: document.querySelector("#amiCompareTabs"),
-  amiCompareDetail: document.querySelector("#amiCompareDetail"),
   datasetBars: document.querySelector("#datasetBars"),
   coverageBars: document.querySelector("#coverageBars"),
 };
@@ -53,7 +50,6 @@ function init() {
   renderFilters();
   renderSampleList();
   renderTagToolbar();
-  renderAmiAnalysis();
   renderBars();
   renderActiveSample();
   setupWaveformEvents();
@@ -67,7 +63,7 @@ function formatNumber(value, digits = 2) {
   if (value === null || value === undefined || Number.isNaN(value)) return "未生成";
   if (typeof value !== "number") return String(value);
   if (Math.abs(value) >= 100) return value.toFixed(0);
-  return value.toFixed(digits).replace(/\\.00$/, "");
+  return value.toFixed(digits).replace(/\.00$/, "");
 }
 
 function formatPercent(value) {
@@ -97,7 +93,7 @@ function renderMetrics() {
   const metrics = [
     ["Phase2 samples", data.summary.sampleCount, `${data.summary.datasetCount} 个数据集，每个 5 条样本`],
     ["Playable audio", data.summary.selectedCount, "phase2 全量音频，可播放和查看波形"],
-    ["Topic labels", `${data.summary.topicCount}/${data.summary.sampleCount}`, "OpenAI Responses 输出层级 topic"],
+    ["Noise categories", `${data.summary.coverage.sound_field_scene}/${data.summary.sampleCount}`, "DASS 噪音类别（docs/DASS.md ②–⑦），具体标签见 composition"],
     ["Speaker labels", `${data.summary.speakerCount}/${data.summary.sampleCount}`, `${data.summary.speakerMultiCount} 条 multi-speaker`],
   ];
 
@@ -152,10 +148,14 @@ function renderSampleList() {
     .map((sample) => {
       const active = sample.sampleId === state.activeId ? "is-active" : "";
       const transcriptState = hasTranscript(sample) ? "transcript" : "no transcript";
-      const sound = sample.tags.sound_field_scene?.sound || [];
-      const soundState = sound.length ? `sound: ${sound.slice(0, 2).join(", ")}` : "sound: none";
+      const noise = sample.tags.sound_field_scene?.external_noise_type || [];
+      const noiseState = noise.length ? `noise: ${formatNoiseTypes(noise)}` : "noise: none";
       const topic = sample.tags.language_content?.topic;
-      const speaker = speakerHasValues(sample.tags.speaker) ? "speaker: ready" : "speaker: none";
+      const speaker = sample.tags.speaker;
+      const speakerState =
+        speaker && speaker.speaker_count !== null && speaker.speaker_count !== undefined
+          ? `speaker: ${speaker.speaker_count}`
+          : "speaker: none";
       const color = datasetColors.get(sample.dataset) || "#16796f";
       return `
         <button type="button" class="sample-button ${active}" data-sample="${escapeAttr(sample.sampleId)}">
@@ -166,8 +166,8 @@ function renderSampleList() {
             <span>${compactDataset(sample.dataset)}</span>
             <span>${formatDuration(sample.durationSec)}</span>
             <span>${transcriptState}</span>
-            <span>${topic ? `topic: ${topic}` : soundState}</span>
-            <span>${speaker}</span>
+            <span>${topic ? `topic: ${topic}` : noiseState}</span>
+            <span>${speakerState}</span>
           </div>
         </button>
       `;
@@ -200,157 +200,6 @@ function renderTagToolbar() {
       renderTags(getActiveSample());
     });
   });
-}
-
-function renderAmiAnalysis() {
-  const analysis = data.amiAnalysis;
-  if (!analysis || !els.amiSplitMetrics || !els.amiSplitSteps) return;
-  const split = analysis.splitLogic;
-  const comparison = analysis.comparison;
-
-  els.amiSplitMetrics.innerHTML = [
-    ["切片总数", split.totalSegments, `${split.sourceMeeting}`],
-    ["目标时长", `${split.targetDurationSec}s`, `${split.minDurationSec}-${split.maxDurationSec}s 软约束`],
-    ["时长分布", `${split.durationSec.median}s`, `min ${split.durationSec.min}s / mean ${split.durationSec.mean}s / max ${split.durationSec.max}s`],
-    ["说话人", `${split.speakerCount.mean}`, `每段 speaker 数均值，范围 ${split.speakerCount.min}-${split.speakerCount.max}`],
-  ]
-    .map(
-      ([label, value, caption]) => `
-        <div class="ami-mini-metric">
-          <p>${escapeHtml(label)}</p>
-          <strong>${escapeHtml(value)}</strong>
-          <span>${escapeHtml(caption)}</span>
-        </div>
-      `,
-    )
-    .join("");
-
-  els.amiSplitSteps.innerHTML = split.rules
-    .map((item) => `<li>${escapeHtml(item)}</li>`)
-    .join("");
-
-  if (!state.activeAmiId && comparison.samples.length) {
-    state.activeAmiId = comparison.samples[0].sampleId;
-  }
-  renderAmiCompareTabs(comparison);
-  renderAmiCompareDetail(comparison);
-}
-
-function renderAmiCompareTabs(comparison) {
-  els.amiCompareTabs.innerHTML = comparison.samples
-    .map((sample) => {
-      const active = sample.sampleId === state.activeAmiId ? "is-active" : "";
-      return `
-        <button type="button" class="${active}" data-ami-sample="${escapeAttr(sample.sampleId)}">
-          ${escapeHtml(shortAmiId(sample.sampleId))}
-        </button>
-      `;
-    })
-    .join("");
-  els.amiCompareTabs.querySelectorAll("button").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.activeAmiId = button.dataset.amiSample;
-      renderAmiCompareTabs(comparison);
-      renderAmiCompareDetail(comparison);
-    });
-  });
-}
-
-function renderAmiCompareDetail(comparison) {
-  const sample =
-    comparison.samples.find((item) => item.sampleId === state.activeAmiId) ||
-    comparison.samples[0];
-  if (!sample) return;
-
-  const phase = sample.phase2;
-  const annotated = sample.annotated;
-  const phaseSilence = phase.tags.silenceRatio ?? 0;
-  const annotatedSilence = annotated.tags.silenceRatio ?? 0;
-  const maxSilence = Math.max(phaseSilence, annotatedSilence, 0.01);
-
-  els.amiCompareDetail.innerHTML = `
-    <div class="ami-sample-head">
-      <div>
-        <p class="eyebrow">${escapeHtml(amiExampleLabel(sample.sampleId))}</p>
-        <h4>${escapeHtml(topicComparisonText(sample))}</h4>
-      </div>
-      <div class="ami-delta ${sample.delta.speakerChanged ? "is-different" : ""}">
-        ${sample.delta.speakerChanged ? "speaker differs" : "speaker same"}
-      </div>
-    </div>
-    <p class="ami-transcript">${escapeHtml(sample.transcript)}</p>
-    <div class="ami-compare-grid">
-      ${renderAmiSourceCard(comparison.phase2Label, phase, "phase2")}
-      ${renderAmiSourceCard(comparison.annotatedLabel, annotated, "annotated")}
-    </div>
-    <div class="ami-bars">
-      <div class="ami-bar-row">
-        <span>${escapeHtml(comparison.phase2Label)}</span>
-        <div class="ami-bar-track">
-          <div class="ami-bar-fill" style="width:${Math.round((phaseSilence / maxSilence) * 100)}%"></div>
-        </div>
-        <strong>${formatPercent(phase.tags.silenceRatio)}</strong>
-      </div>
-      <div class="ami-bar-row">
-        <span>${escapeHtml(comparison.annotatedLabel)}</span>
-        <div class="ami-bar-track">
-          <div class="ami-bar-fill annotated" style="width:${Math.round((annotatedSilence / maxSilence) * 100)}%"></div>
-        </div>
-        <strong>${formatPercent(annotated.tags.silenceRatio)}</strong>
-      </div>
-    </div>
-  `;
-}
-
-function renderAmiSourceCard(label, source, kind) {
-  const speaker = source.tags.speaker || {};
-  const metadata = kind === "annotated"
-    ? `${source.utteranceCount} utterance(s), ${source.speakerCount} speaker(s): ${source.speakers.join(", ")}`
-    : "native_metadata 为空，VAD/speaker 退回模型";
-  return `
-    <section class="ami-source">
-      <h4>${escapeHtml(label)}</h4>
-      <dl>
-        <dt>metadata</dt>
-        <dd>${escapeHtml(metadata)}</dd>
-        <dt>VAD route</dt>
-        <dd>${escapeHtml(source.vadRoute)}</dd>
-        <dt>speaker route</dt>
-        <dd>${escapeHtml(source.speakerRoute)}</dd>
-        <dt>topic</dt>
-        <dd>${escapeHtml(source.tags.topic || "null")}</dd>
-        <dt>silence</dt>
-        <dd>${formatPercent(source.tags.silenceRatio)} / ${source.tags.silenceSegmentCount ?? 0} segment(s)</dd>
-        <dt>speaker flags</dt>
-        <dd>${flagBadges(speaker)}</dd>
-      </dl>
-    </section>
-  `;
-}
-
-function topicComparisonText(sample) {
-  if (sample.delta.topicChanged) {
-    return `topic changed: ${sample.phase2.tags.topic || "null"} -> ${sample.annotated.tags.topic || "null"}`;
-  }
-  return `topic stable: ${sample.annotated.tags.topic || "null"}`;
-}
-
-function shortAmiId(sampleId) {
-  return sampleId.replace("EN2001a_utterance_", "#");
-}
-
-function amiExampleLabel(sampleId) {
-  return `AMI 示例 ${shortAmiId(sampleId)}`;
-}
-
-function flagBadges(speaker) {
-  return ["multi_speaker", "speaker_change", "speaker_overlap"]
-    .map((key) => {
-      const value = speaker[key];
-      const cls = value === true ? "yes" : value === false ? "no" : "null";
-      return `<span class="ami-flag ${cls}">${key}: ${value === null || value === undefined ? "null" : value}</span>`;
-    })
-    .join("");
 }
 
 function renderActiveSample() {
@@ -427,21 +276,22 @@ function renderTags(sample) {
 function getCardsForGroup(sample, group) {
   const tags = sample.tags;
   const basic = tags.basic_acoustic || {};
+  const quality = tags.audio_quality || {};
+  const room = tags.room_acoustic || {};
   const scene = tags.sound_field_scene || {};
   const lang = tags.language_content || {};
   const speaker = tags.speaker || {};
 
   if (group === "overview") {
-    const speakerReady = speakerHasValues(speaker);
     return [
-      card("Duration", formatDuration(basic.duration_sec), `${formatNumber(basic.sample_rate_hz, 0)} Hz / ${basic.channels || "?"} channel`),
-      card("SNR", formatUnit(basic.snr_db, "dB", 2), "更高通常表示背景噪声更少", basic.snr_db == null),
+      card("Duration", formatDuration(basic.duration_sec), `${formatNumber(basic.sample_rate_hz, 0)} Hz / ${basic.channels ?? "?"} channel`),
+      card("SNR", formatUnit(quality.snr_db, "dB", 2), "更高通常表示背景噪声更少", quality.snr_db == null),
       card("Silence ratio", formatPercent(basic.silence_ratio), `${(basic.silence_segments || []).length} silence segment(s)`),
-      card("DNSMOS OVRL", formatNumber(basic.dnsmos_ovrl, 2), "模型估计的整体语音质量", basic.dnsmos_ovrl == null),
+      card("DNSMOS OVRL", formatNumber(quality.dnsmos_ovrl, 2), "模型估计的整体语音质量", quality.dnsmos_ovrl == null),
       card("Language", lang.language || "未生成", hasTranscript(sample) ? `${lang.word_count ?? 0} words/chars` : "缺少 transcript", !lang.language),
-      card("Topic", lang.topic || "未生成", "OpenAI Responses taxonomy label", !lang.topic),
-      card("RT60", formatUnit(scene.rt60, "s", 3), "Rec-RIR reverberation estimate", scene.rt60 == null),
-      card("Speaker", speakerStatus(speaker), speakerReady ? "metadata-first diarization flags" : "未生成", !speakerReady),
+      card("External noise", formatNoiseTypes(scene.external_noise_type || []), "DASS 噪音类别（docs/DASS.md ②–⑦）", !(scene.external_noise_type || []).length),
+      card("RT60", formatUnit(room.rt60_sec, "s", 3), "Rec-RIR reverberation estimate", room.rt60_sec == null),
+      card("Speaker count", speaker.speaker_count ?? "未生成", speakerStatus(speaker), speaker.speaker_count == null),
     ];
   }
 
@@ -450,44 +300,58 @@ function getCardsForGroup(sample, group) {
       card("duration_sec", formatNumber(basic.duration_sec, 3), "音频时长"),
       card("sample_rate_hz", formatNumber(basic.sample_rate_hz, 0), "采样率"),
       card("channels", basic.channels ?? "未生成", "声道数"),
-      card("snr_db", formatUnit(basic.snr_db, "dB", 3), "估计信噪比", basic.snr_db == null),
-      card("c50", formatNumber(basic.c50, 3), "清晰度指标"),
-      card("silence_ratio", formatPercent(basic.silence_ratio), "metadata 优先；缺失时退回 VAD 模型"),
+      card("silence_ratio", formatPercent(basic.silence_ratio), "metadata 优先；缺失时退回 FireRed VAD"),
       card("silence_segments", listSegments(basic.silence_segments), "静音片段，波形中以琥珀色显示", !basic.silence_segments?.length),
-      card("dnsmos_sig", formatNumber(basic.dnsmos_sig, 3), "speech quality"),
-      card("dnsmos_bak", formatNumber(basic.dnsmos_bak, 3), "background quality", basic.dnsmos_bak == null),
-      card("dnsmos_ovrl", formatNumber(basic.dnsmos_ovrl, 3), "overall quality", basic.dnsmos_ovrl == null),
-      card("dnsmos_p808", formatNumber(basic.dnsmos_p808, 3), "P.808 MOS estimate"),
+    ];
+  }
+
+  if (group === "audio_quality") {
+    return [
+      card("snr_db", formatUnit(quality.snr_db, "dB", 3), "Brouhaha 逐帧 SNR 均值", quality.snr_db == null),
+      card("dnsmos_sig", formatNumber(quality.dnsmos_sig, 3), "speech quality", quality.dnsmos_sig == null),
+      card("dnsmos_bak", formatNumber(quality.dnsmos_bak, 3), "background quality", quality.dnsmos_bak == null),
+      card("dnsmos_ovrl", formatNumber(quality.dnsmos_ovrl, 3), "overall quality", quality.dnsmos_ovrl == null),
+      card("dnsmos_p808", formatNumber(quality.dnsmos_p808, 3), "P.808 MOS estimate", quality.dnsmos_p808 == null),
+    ];
+  }
+
+  if (group === "room_acoustic") {
+    return [
+      card("rt60_sec", formatUnit(room.rt60_sec, "s", 4), "Rec-RIR 混响衰减时间（T20 拟合外推 -60 dB）", room.rt60_sec == null),
+      card("c50_db", formatNumber(room.c50_db, 4), "基于估计 RIR 的清晰度（直达声后 50ms 早/晚能量比）", room.c50_db == null),
+      card("far_field", room.far_field ?? "未生成", "预留字段", room.far_field == null),
     ];
   }
 
   if (group === "sound_field_scene") {
     return [
-      card("audio_events", listValue(scene.audio_events), "PANNs top events", !scene.audio_events?.length),
-      card("sound", listValue(scene.sound), "detected non-speech sound", !scene.sound?.length),
-      card("music", scene.music === true ? "true" : "false", "music flag"),
-      card("rt60", formatUnit(scene.rt60, "s", 4), "reverberation time", scene.rt60 == null),
-      card("c50", formatNumber(scene.c50, 4), "scene clarity"),
-      card("far_field", scene.far_field ?? "未生成", "预留字段", scene.far_field == null),
+      card("speech_music_events", listValue(scene.speech_music_events), "FireRed AED 检出类别（speech/singing/music 固定顺序）", !scene.speech_music_events?.length),
+      card("music_present", scene.music_present ?? "未生成", "AED 是否检出音乐；同时门控 noise_composition 的音乐桶", scene.music_present == null),
+      card("sound", listValue(scene.sound), "PANNs 背景声（不在默认链路）", !scene.sound?.length),
+      card("external_noise_type", formatNoiseTypes(scene.external_noise_type || []), "DASS 噪音类别键（docs/DASS.md ②–⑦；未被排除且 ≥0.25 的标签所归类别，人类/未归类不公开）", !scene.external_noise_type?.length),
+      card("noise_composition", formatComposition(scene.noise_composition), "展开 external_noise_type 各类别的具体标签；每类 top-3 ≥ 0.3，音乐以 FireRed AED 门控", scene.noise_composition == null),
     ];
   }
 
   if (group === "language_content") {
     return [
-      card("language", lang.language || "未生成", hasTranscript(sample) ? "deterministic transcript tag" : "缺少 transcript", !lang.language),
+      card("language", lang.language || "未生成", hasTranscript(sample) ? "FireRed LID 音频语言识别" : "缺少 transcript", !lang.language),
       card("word_count", lang.word_count ?? "未生成", "英文按 token，中文按字符/分词结果"),
       card("filler", lang.filler ?? "未生成", "um/uh/okay 等填充表达"),
       card("punctuation", punctuationValue(lang.punctuation), "标点统计", !lang.punctuation),
       card("repetition", repetitionValue(lang.repetition), "重复词统计", !lang.repetition),
-      card("topic", lang.topic ?? "未生成", "OpenAI Responses 层级 topic", !lang.topic),
+      card("topic", lang.topic ?? "未生成", "OpenAI Responses 层级 topic（默认关闭，--topic-enable 启用）", !lang.topic),
     ];
   }
 
   const speakerReady = speakerHasValues(speaker);
   return [
-    card("multi_speaker", speaker.multi_speaker ?? "未生成", "metadata 优先；缺失时退回 diarization", !speakerReady),
-    card("speaker_change", speaker.speaker_change ?? "未生成", "当前 utterance 内是否存在说话人切换", !speakerReady),
-    card("speaker_overlap", speaker.speaker_overlap ?? "未生成", "当前 utterance 内是否存在重叠说话", !speakerReady),
+    card("speaker_count", speaker.speaker_count ?? "未生成", "解析出的说话人数（quality-shadow：Sortformer 主判）", !speakerReady),
+    card("multi_speaker", speaker.multi_speaker ?? "未生成", "是否包含两个或更多说话人", !speakerReady),
+    card("speaker_change_count", speaker.speaker_change_count ?? "未生成", "说话人切换次数", !speakerReady),
+    card("speaker_change", speaker.speaker_change ?? "未生成", "是否发生说话人切换", !speakerReady),
+    card("overlap_ratio", formatPercent(speaker.overlap_ratio), "重叠发言时长 / 有效语音时长", speaker.overlap_ratio == null),
+    card("speaker_overlap", speaker.speaker_overlap ?? "未生成", "是否多人同时发言（Pyannote 主判）", !speakerReady),
   ];
 }
 
@@ -495,14 +359,38 @@ function card(label, value, subtext, isNull = false) {
   return { label, value: String(value), subtext, isNull };
 }
 
-function listValue(value) {
+function listValue(value, limit) {
   if (!Array.isArray(value) || value.length === 0) return "[]";
-  return value.join(", ");
+  const shown = limit ? value.slice(0, limit) : value;
+  const suffix = limit && value.length > limit ? ` +${value.length - limit}` : "";
+  return shown.join(", ") + suffix;
 }
 
 function listSegments(segments) {
   if (!Array.isArray(segments) || segments.length === 0) return "[]";
   return segments.map((segment) => `${formatNumber(segment.start_sec, 2)}-${formatNumber(segment.end_sec, 2)}s`).join(", ");
+}
+
+const NOISE_CATEGORY_LABELS = {
+  music: "音乐",
+  animal: "动物",
+  mechanical: "机械",
+  nature: "自然",
+  formless: "无明确声源",
+  channel_environment: "声道/环境",
+};
+
+function formatNoiseTypes(keys) {
+  if (!Array.isArray(keys) || !keys.length) return "空（无检出类别）";
+  return keys.map((key) => NOISE_CATEGORY_LABELS[key] || key).join(", ");
+}
+
+function formatComposition(value) {
+  if (!value || typeof value !== "object") return "未生成";
+  const parts = Object.entries(value)
+    .filter(([, labels]) => Array.isArray(labels) && labels.length > 0)
+    .map(([key, labels]) => `${key}: ${labels.join(", ")}`);
+  return parts.length ? parts.join(" · ") : "空（无检出类别）";
 }
 
 function punctuationValue(value) {
@@ -533,6 +421,8 @@ function renderBars() {
 
   const groupLabels = {
     basic_acoustic: "Basic acoustic",
+    audio_quality: "Audio quality",
+    room_acoustic: "Room acoustic",
     sound_field_scene: "Sound field scene",
     language_content: "Language content",
     speaker: "Speaker diarization",

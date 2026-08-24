@@ -183,6 +183,7 @@ class MossDiarizeSubprocessClient:
                 "config": _subprocess_config(self.config),
             },
             context=context,
+            timeout_sec=self.config.timeout_sec,
         )
         return result["output"]
 

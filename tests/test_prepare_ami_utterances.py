@@ -101,6 +101,30 @@ class PrepareAmiUtterancesTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 prepare_dataset(annotations, source_audio, output_dir)
 
+    def test_clamps_endpoint_padding_to_source_duration(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_audio = root / "meeting.wav"
+            annotations = root / "meeting.jsonl"
+            output_dir = root / "output"
+            with wave.open(str(source_audio), "wb") as sink:
+                sink.setnchannels(1)
+                sink.setsampwidth(2)
+                sink.setframerate(10)
+                sink.writeframes(struct.pack("<120h", *range(120)))
+            annotations.write_text(
+                json.dumps(_utterance("utt_0", "A", 1.0, 11.8, "Test.", 2.0, 3.0))
+                + "\n",
+                encoding="utf-8",
+            )
+
+            summary = prepare_dataset(annotations, source_audio, output_dir)
+
+            self.assertEqual(summary["utterance_count"], 1)
+            self.assertEqual(summary["max_duration_sec"], 11.5)
+            with wave.open(str(output_dir / "audio" / "meeting_utterance_00000.wav"), "rb") as cut:
+                self.assertEqual(cut.getnframes(), 115)
+
 
 def _utterance(utt_id, speaker, start, end, text, word_start, word_end):
     return {

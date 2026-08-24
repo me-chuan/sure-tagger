@@ -6,8 +6,16 @@ directory before running silence tagging.
 Fill FIRERED_AED_MODEL_DIR with the local FireRedVAD non-streaming AED model
 directory before running music tagging.
 
+Fill FIRERED_LID_* with the FireRedASR2S LID repo, pretrained model dir, and
+dedicated Python environment before running spoken-language tagging.
+
 Fill PANNS_* with the pinned AudioSet tagging repository, Cnn14 checkpoint, and
 dedicated Python environment before running background-sound tagging.
+
+Fill DASS_* with the local DASS AudioSet checkpoint and its Python environment
+before running background-noise-type tagging. The checkpoint was deployed by
+sure-harness and copied into models/DASS; the Python environment reuses the
+sure-harness model venv.
 
 Fill BROUHAHA_MODEL_PATH with the local Brouhaha checkpoint before running
 SNR/C50 tagging. The default location is inside this project.
@@ -38,6 +46,10 @@ FIRERED_VAD_PYTHON = ".runtime/fireredvad_rebuild_py310/bin/python"
 FIRERED_AED_MODEL_DIR = "models/FireRedVAD/pretrained_models/FireRedVAD/AED"
 FIRERED_AED_PYTHON = ".runtime/fireredvad_rebuild_py310/bin/python"
 
+FIRERED_LID_REPO_DIR = "models/FireRedASR2S/examples_infer/lid"
+FIRERED_LID_MODEL_DIR = "models/FireRedASR2S/pretrained_models/FireRedLID"
+FIRERED_LID_PYTHON = ".runtime/fireredlid_py311/bin/python"
+
 PANNS_REPO_DIR = "models/audioset_tagging_cnn"
 PANNS_CHECKPOINT_PATH = (
     "models/audioset_tagging_cnn/checkpoints/Cnn14_mAP=0.431.pth"
@@ -47,6 +59,16 @@ PANNS_MODEL_VERSION = (
     "@d2f4b8c18eab44737fcc0de1248ae21eb43f6aa4"
 )
 PANNS_PYTHON = ".runtime/panns_py310/bin/python"
+
+DASS_MODEL_DIR = "models/DASS/saurabhati__DASS_medium_AudioSet_48.9"
+DASS_MODEL_VERSION = (
+    "huggingface:saurabhati/DASS_medium_AudioSet_48.9"
+    "@250cdd3ba4c43d790c64d7e7a48f9c5ac881a5d2"
+)
+DASS_PYTHON = (
+    "~/sure-harness_v1/sure/models/"
+    "saurabhati__DASS_medium_AudioSet_48.9/.venv/bin/python"
+)
 
 BROUHAHA_REPO_DIR = "models/brouhaha/brouhaha-vad"
 BROUHAHA_MODEL_PATH = "models/brouhaha/brouhaha-vad/models/best/checkpoints/best.ckpt"

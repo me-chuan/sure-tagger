@@ -57,7 +57,7 @@ python3 scripts/run_tagger.py \
   --manifest phase2_asr_sample/manifest.jsonl \
   --output outputs/one_sample_tags.jsonl \
   --sample-id EN2001a_utterance_00000 \
-  --moss-diarize-enable
+  --speaker-profile quality-shadow
 ```
 
 基于已有 tags-only 输出补某个样本的指定标签：
@@ -112,7 +112,7 @@ manifest 每行是一个封闭的 raw-only JSON 对象。例如：
 
 ## 3. 当前可打标签
 
-当前 tagging pipeline 定义了 26 个公开字段。`sound_field_scene.far_field`
+当前 tagging pipeline 定义了 30 个公开字段。`room_acoustic.far_field`
 仍是预留字段，暂时输出 `null`。`language_content.topic` 已接入可选的
 OpenAI Responses 实现，但默认关闭；未启用、配置缺失或调用失败时输出
 `null`。
@@ -126,53 +126,90 @@ OpenAI Responses 实现，但默认关闭；未启用、配置缺失或调用失
 | `basic_acoustic.channels` | integer | 读取原始音频流元数据 | 源文件声道数，不是模型降混后的声道数。 |
 | `basic_acoustic.silence_segments` | array | 优先使用 native metadata 中的 speech/silence/utterance/word segments；没有可用 metadata 时用 FireRed VAD | 静音时间段，每项为 `{"start_sec": number, "end_sec": number}`。 |
 | `basic_acoustic.silence_ratio` | number / `[0, 1]` | 静音段总时长除以 `duration_sec` | 静音占整段音频的比例。 |
-| `basic_acoustic.snr_db` | number / dB | Brouhaha 输出逐帧 SNR，再对所有有效预测取算术均值 | 语音相对背景噪声的强度；通常越大越好。 |
-| `basic_acoustic.c50` | number / dB | Brouhaha 直接预测逐帧 C50，再取算术均值 | 模型预测的语音清晰度；通常越大越清晰。 |
-| `basic_acoustic.dnsmos_sig` | number / MOS `[1, 5]` | DNSMOS P.835 SIG | 语音信号本身的质量和失真程度；越高越好。 |
-| `basic_acoustic.dnsmos_bak` | number / MOS `[1, 5]` | DNSMOS P.835 BAK | 背景噪声的不干扰程度；越高越好。 |
-| `basic_acoustic.dnsmos_ovrl` | number / MOS `[1, 5]` | DNSMOS P.835 OVRL | 综合语音和背景影响的整体质量；越高越好。 |
-| `basic_acoustic.dnsmos_p808` | number / MOS `[1, 5]` | DNSMOS P.808 | P.808 模型预测的主观整体质量；越高越好。 |
+
+### 3.2 音频质量标签
+
+| Tag | 类型 / 单位 | 打标方法 | 含义 |
+| --- | --- | --- | --- |
+| `audio_quality.snr_db` | number / dB | Brouhaha 输出逐帧 SNR，再对所有有效预测取算术均值 | 语音相对背景噪声的强度；通常越大越好。 |
+| `audio_quality.dnsmos_sig` | number / MOS `[1, 5]` | DNSMOS P.835 SIG | 语音信号本身的质量和失真程度；越高越好。 |
+| `audio_quality.dnsmos_bak` | number / MOS `[1, 5]` | DNSMOS P.835 BAK | 背景噪声的不干扰程度；越高越好。 |
+| `audio_quality.dnsmos_ovrl` | number / MOS `[1, 5]` | DNSMOS P.835 OVRL | 综合语音和背景影响的整体质量；越高越好。 |
+| `audio_quality.dnsmos_p808` | number / MOS `[1, 5]` | DNSMOS P.808 | P.808 模型预测的主观整体质量；越高越好。 |
 
 DNSMOS 将短于 9.01 秒的音频循环补足，使用 9.01 秒窗口和 1 秒 hop，
 最后对所有完整窗口的分数取均值。
 
-### 3.2 声场和声音事件标签
+Brouhaha 同时预测逐帧 C50，但该值只作为内部 evidence
+（`internal.brouhaha_c50_db`）用于与 `room_acoustic.c50_db` 交叉验证，
+不进入公开输出。
+
+### 3.3 空间声学标签
 
 | Tag | 类型 / 单位 | 打标方法 | 含义 |
 | --- | --- | --- | --- |
-| `sound_field_scene.rt60` | number / 秒 | Rec-RIR 估计 RIR；对 Schroeder 能量衰减曲线的 `-5 dB` 到 `-25 dB` 区间做 T20 线性拟合，并外推到 `-60 dB` | 混响衰减时间；通常越大表示混响尾部越长。 |
-| `sound_field_scene.c50` | number / dB | 在 Rec-RIR 估计结果中定位最大绝对幅值的直达声，计算其后 50 ms 早期能量与剩余晚期能量之比 `10*log10(E_early/E_late)` | 基于估计 RIR 的清晰度；越大通常越清晰。 |
-| `sound_field_scene.audio_events` | string array | FireRed AED | 检出的 `speech`、`singing`、`music` 类别，始终按这个固定顺序排列。事件时间段和帧比例仅保留为内部 evidence。 |
-| `sound_field_scene.music` | boolean | FireRed AED | `audio_events` 是否包含 `music`。保留该字段用于直接进行音乐样本筛选。 |
-| `sound_field_scene.sound` | string array | PANNs Cnn14 / AudioSet | 达到阈值的具体背景声类别，按模型分数从高到低排列，最多 10 类。公开结果只包含英文类别名，不包含分数。 |
+| `room_acoustic.rt60_sec` | number / 秒 | Rec-RIR 估计 RIR；对 Schroeder 能量衰减曲线的 `-5 dB` 到 `-25 dB` 区间做 T20 线性拟合，并外推到 `-60 dB` | 混响衰减时间；通常越大表示混响尾部越长。 |
+| `room_acoustic.c50_db` | number / dB | 在 Rec-RIR 估计结果中定位最大绝对幅值的直达声，计算其后 50 ms 早期能量与剩余晚期能量之比 `10*log10(E_early/E_late)` | 基于估计 RIR 的清晰度；越大通常越清晰。 |
+
+`room_acoustic.c50_db` 是 Rec-RIR 的物理指标；Brouhaha 的直接 C50 模型预测
+只在内部 evidence 中保留，两者来源不同，不能互相覆盖。
+
+### 3.4 声场和声音事件标签
+
+| Tag | 类型 / 单位 | 打标方法 | 含义 |
+| --- | --- | --- | --- |
+| `sound_field_scene.speech_music_events` | string array | FireRed AED | 检出的 `speech`、`singing`、`music` 类别，始终按这个固定顺序排列。事件时间段和帧比例仅保留为内部 evidence。 |
+| `sound_field_scene.music_present` | boolean | FireRed AED | `speech_music_events` 是否包含 `music`。保留该字段用于直接进行音乐样本筛选。 |
+| `sound_field_scene.sound` | string array | PANNs Cnn14 / AudioSet | 达到阈值的具体背景声类别，按模型分数从高到低排列，最多 10 类。公开结果只包含英文类别名，不包含分数。panns stage 已不在默认链路中，需 `--only-tags panns` 或 `--only-tags sound_field_scene.sound` 显式选择才会产出；否则为 `null`。 |
+| `sound_field_scene.external_noise_type` | string array | DASS AudioSet-2M | 检出的 docs/DASS.md 噪音类别键数组：`music`、`animal`、`mechanical`、`nature`、`formless`、`channel_environment`（人类声音与未归类标签永不公开）。类别由全量 527 类向量中未被排除且达到默认阈值 `0.25`（2026-08-24 在 phase2 上校准：DASS-medium 真实噪声类分数偏软 0.1–0.45，干净语音低于 0.15）的标签归组而来，按各类别最高分降序排列；具体标签见 `noise_composition`。 |
+| `sound_field_scene.noise_composition` | object | DASS AudioSet-2M + FireRed AED 门控 | 按 docs/DASS.md 类别归组的背景声组成，展开 `external_noise_type` 每个类别的具体标签。固定含 `music`、`animal`、`mechanical`、`nature`、`formless`、`channel_environment` 六个键，每键为按分数降序的标签名数组；每类最多 `--dass-composition-top-k`（默认 3）个，入组阈值 `--dass-composition-threshold`（默认 `0.30`，与外层 0.25 阈值相互独立）。音乐类别以 FireRed AED 为准：`music_present` 为 `false` 时为空数组，为 `true` 或 AED 未运行（`null`）时输出 DASS 音乐类标签；人类声音与未归类标签只进内部 evidence。成功无检出时各键为空数组，工具失败时整个字段为 `null`。 |
 
 PANNs 的默认阈值是 `0.30`。音频被切成互不重叠的 10 秒分块，最后一个
 分块不足 10 秒时补零。每个 AudioSet 类别取所有分块中的最大概率，然后
 输出达到阈值的前 10 个背景声类别。主语音、静音、室内/室外场景标签、
 混响和回声被排除；音乐、歌唱、人群声、动物、自然声、车辆、机械和噪声等
-类别可以进入结果。
+类别可以进入结果。PANNs 已退出默认链路，需要时显式选择 panns stage。
 
-`basic_acoustic.c50` 是 Brouhaha 的直接模型预测，
-`sound_field_scene.c50` 是从 Rec-RIR 输出计算的物理指标。两者来源不同，
-不能互相覆盖或当作同一个字段使用。
+DASS 的默认阈值是 `0.25`，按互不重叠分块（上游 extractor 固化的 10.24
+秒窗口）取每类最大概率。`external_noise_type` 输出的是 docs/DASS.md 的
+类别键：全量 527 类向量中任一**未被排除**的标签达到阈值，其所属类别
+即出现在结果里，按各类别最高分降序排列；排除政策（主语音、静音、声学
+场景、混响、回声）同样作用于类别推导——Silence 不会把干净语音样本标
+成 `formless`，`--no-exclusion` 时才放开；人类声音与未归类标签永不公开。阈值从 AudioSet 惯例 `0.50` 下调是 phase2 校准的结果：
+DASS-medium 对真实噪声类输出的 sigmoid 分数普遍偏软（0.1–0.45），而
+干净语音样本的可输出类最高分不超过 0.15，`0.25` 能在不误报干净语音的
+前提下找回真实噪声标签。排除策略只影响内部 evidence 的 top 事件
+（默认排除主语音、静音、声学场景、混响和回声；全有/全无，传
+`--no-exclusion` 后全部关闭）。
 
-### 3.3 说话人标签
+`noise_composition` 把 `external_noise_type` 的每个类别展开为具体标签：
+它对全量 527 维 sigmoid 向量按 docs/DASS.md 的 7 类能力划分归组（不受
+排除策略影响），每类取分数最高的前 3 个且不低于 0.3 的标签。音乐类以
+FireRed AED 的 `music_present` 门控——AED 判定无音乐时音乐桶为空数组，
+即使 DASS 有音乐类高分标签；AED 未运行时不做门控。人类声音类别和
+未归类标签只保留在内部 evidence 的 `category_events` 中，不进入公开
+输出；声道/环境/背景类别（inside/outside、reverberation、echo 等）的
+分数也保留在 evidence 中，作为后续 far_field 和混响标签的补充证据
+来源。
+
+### 3.5 说话人标签
 
 | Tag | 类型 | 打标方法 | 含义 |
 | --- | --- | --- | --- |
-| `speaker.multi_speaker` | boolean | 优先使用 native metadata speaker segments；没有可用 metadata 时用 MOSS diarize 或多通道 channel activity，再汇总 speaker metrics | 样本内是否包含两个或更多不同说话人。 |
-| `speaker.speaker_change` | boolean | speaker timeline 内是否出现说话人切换点 | 样本内是否发生说话人切换。 |
-| `speaker.speaker_overlap` | boolean | speaker timeline 内是否存在重叠发言区间 | 样本内是否有多个说话人同时发言。 |
+| `speaker.speaker_count` | non-negative integer | speaker v2 的 count claim；`quality-shadow` 以 Sortformer 为主、MOSS 为 fallback | 样本内解析出的说话人数。 |
+| `speaker.multi_speaker` | boolean | speaker v2 的 multi-speaker claim；Sortformer 主判，MOSS 作 guard | 是否包含两个或更多不同说话人。 |
+| `speaker.speaker_change_count` | non-negative integer | 从 speaker v2 为 change claim 选中的 timeline 派生 | 样本内说话人切换次数。 |
+| `speaker.speaker_change` | boolean | speaker v2 的 change claim；`quality-shadow` 以 MOSS 为主、Sortformer 为 guard/fallback | 是否发生说话人切换。 |
+| `speaker.overlap_ratio` | number / `[0, 1]` | 从 speaker v2 为 overlap claim 选中的 timeline 派生，分母为 speech union duration | 重叠发言时长占有效语音时长的比例。 |
+| `speaker.speaker_overlap` | boolean | speaker v2 的 overlap claim；Pyannote 主判，Sortformer/MOSS 作 witness 或 fallback | 是否存在多人同时发言。 |
 
-可识别的 metadata 字段包括 `speaker_segments`、`diarization_segments`、
-带 speaker 的 `segments`、以及 AMI 风格 `utterances[]`。每个 segment 至少
-需要 `start`/`end` 或 `start_sec`/`end_sec`，speaker 字段可为 `speaker`、
-`speaker_id`、`label` 或 `spk`。MOSS diarize 默认不开启；需要通过
-`--moss-diarize-enable` 和 endpoint/model 配置接入。多通道 separated
-headset 输入可使用 channel activity fallback。完整 speaker metadata 只作为
-内部 artifact 保存，不进入公开 tags-only 输出。
+总线直接调用 `tagger/pipelines/speaker_evidence.py`，默认 profile 是
+`quality-shadow`，不再读取 native metadata 生成 speaker 公开值，也不存在旧的
+MOSS enable 门禁或 channel-activity 分流。可用 `--speaker-profile lean-shadow`
+选择较低成本的模型组合。证据、时间线、对齐结果和 claim fusion 只保存为内部
+artifact，不进入公开 tags-only 输出。
 
-### 3.4 语言内容标签
+### 3.6 语言内容标签
 
 这些标签只读取 `sample.text.transcript`，不需要音频文件。除 topic 外，
 其余字段都是确定性规则。
@@ -205,7 +242,7 @@ transcript，不读取音频。
 | DNSMOS | 16 kHz、单通道 | 多通道取均值，使用 librosa 重采样。 |
 | PANNs Cnn14 | 32 kHz、单通道 | `librosa.load(..., sr=32000, mono=True)`。 |
 | Rec-RIR | 16 kHz、单通道 | torchaudio 对多通道取均值并重采样，临时 WAV 推理后删除。 |
-| Native metadata speaker | 原始 `sample.native_metadata` | 如果存在 speaker/start/end segment，直接构建 speaker timeline 和公开 speaker flags。 |
+| Speaker v2 | 各模型适配器要求的单通道采样率 | MOSS、Sortformer、Pyannote、ECAPA、FireRed VAD 和 Brouhaha 分别在适配器内完成解码、降混与重采样，再按 profile 融合 claim。 |
 | 确定性语言内容 | 原始 transcript | 不做音频预处理；直接对输入文本 tokenize 和统计。 |
 | Topic | 原始 transcript | 不做音频预处理；启用时将 transcript 和空上下文封装成 JSON prompt 发送到 OpenAI-compatible Responses API。 |
 
@@ -224,12 +261,7 @@ warning 或推理证据。
 ```json
 {
   "basic_acoustic": {
-    "c50": 4.294436,
     "channels": 2,
-    "dnsmos_bak": 1.066441,
-    "dnsmos_ovrl": 1.045056,
-    "dnsmos_p808": 2.162502,
-    "dnsmos_sig": 1.174226,
     "duration_sec": 15.963062,
     "sample_rate_hz": 16000,
     "silence_ratio": 0.674248,
@@ -239,20 +271,40 @@ warning 或推理证据。
       {"start_sec": 5.21, "end_sec": 5.33},
       {"start_sec": 8.41, "end_sec": 13.22},
       {"start_sec": 13.74, "end_sec": 15.963062}
-    ],
+    ]
+  },
+  "audio_quality": {
+    "dnsmos_bak": 1.066441,
+    "dnsmos_ovrl": 1.045056,
+    "dnsmos_p808": 2.162502,
+    "dnsmos_sig": 1.174226,
     "snr_db": -1.159983
   },
-  "sound_field_scene": {
+  "room_acoustic": {
     "far_field": null,
-    "rt60": 0.801379,
-    "c50": 14.032025,
-    "audio_events": ["singing", "music"],
-    "music": true,
-    "sound": ["Music"]
+    "rt60_sec": 0.801379,
+    "c50_db": 14.032025
+  },
+  "sound_field_scene": {
+    "speech_music_events": ["singing", "music"],
+    "music_present": true,
+    "sound": ["Music"],
+    "external_noise_type": ["music"],
+    "noise_composition": {
+      "music": ["Background music"],
+      "animal": [],
+      "mechanical": [],
+      "nature": [],
+      "formless": [],
+      "channel_environment": []
+    }
   },
   "speaker": {
+    "speaker_count": null,
     "multi_speaker": null,
+    "speaker_change_count": null,
     "speaker_change": null,
+    "overlap_ratio": null,
     "speaker_overlap": null
   },
   "language_content": {
@@ -276,15 +328,15 @@ warning 或推理证据。
 
 ```json
 {
-  "audio_events": ["speech"],
-  "music": false,
+  "speech_music_events": ["speech"],
+  "music_present": false,
   "sound": []
 }
 ```
 
 工具未部署、音频无法读取、推理失败或结果校验失败时，对应字段输出
 `null`。不同模型相互隔离，例如 PANNs 失败只会使 `sound` 为 `null`，不会
-清空 FireRed 的 `audio_events` 和 `music`。
+清空 FireRed 的 `speech_music_events` 和 `music_present`。
 
 ## 6. 当前预留字段
 
@@ -293,7 +345,7 @@ warning 或推理证据。
 
 | Tag | 计划含义 |
 | --- | --- |
-| `sound_field_scene.far_field` | 是否为远场拾音或远距离声源。 |
+| `room_acoustic.far_field` | 是否为远场拾音或远距离声源。 |
 
 ## 7. 内部产物
 
@@ -304,5 +356,14 @@ Rec-RIR 估计的完整 RIR 波形不进入公开 JSON。默认保存位置为�
 phase1_asr_samples/outputs/artifacts/rir/
 ```
 
-公开输出只保留从该 RIR 计算得到的 `sound_field_scene.rt60` 和
-`sound_field_scene.c50`。
+公开输出只保留从该 RIR 计算得到的 `room_acoustic.rt60_sec` 和
+`room_acoustic.c50_db`。
+
+Speaker v2 的内部产物默认保存在：
+
+```text
+<output-directory>/artifacts/speaker_v2/<row-key>/
+```
+
+其中包含逐模型 evidence、timeline alignment 和 fusion artifact；重复的
+`sample_id` 通过 manifest 行号组成的 row key 隔离。

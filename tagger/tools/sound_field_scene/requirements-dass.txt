@@ -1,0 +1,12 @@
+# DASS subprocess runtime requirements.
+
+# The DASS tool reuses the sure-harness model venv:
+#   ~/sure-harness_v1/sure/models/saurabhati__DASS_medium_AudioSet_48.9/.venv
+# which already contains the pinned versions below. This file documents the
+# expected runtime for a fresh environment.
+
+torch==2.7.1
+librosa==0.11.0
+numpy==2.4.6
+transformers==4.49.0
+soundfile==0.14.0

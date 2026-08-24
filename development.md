@@ -12,10 +12,23 @@
 
 | 分组 | 字段 |
 | --- | --- |
-| `basic_acoustic` | `duration_sec`、`sample_rate_hz`、`channels`、`silence_segments`、`silence_ratio`、`snr_db`、`c50`、`dnsmos_sig`、`dnsmos_bak`、`dnsmos_ovrl`、`dnsmos_p808` |
-| `sound_field_scene` | `far_field`、`rt60`、`c50`、`audio_events`、`music`、`sound` |
-| `speaker` | `multi_speaker`、`speaker_change`、`speaker_overlap` |
+| `basic_acoustic` | `duration_sec`、`sample_rate_hz`、`channels`、`silence_segments`、`silence_ratio` |
+| `audio_quality` | `snr_db`、`dnsmos_sig`、`dnsmos_bak`、`dnsmos_ovrl`、`dnsmos_p808` |
+| `room_acoustic` | `far_field`、`rt60_sec`、`c50_db` |
+| `sound_field_scene` | `speech_music_events`、`music_present`、`sound`、`external_noise_type`、`noise_composition` |
+| `speaker` | `speaker_count`、`multi_speaker`、`speaker_change_count`、`speaker_change`、`overlap_ratio`、`speaker_overlap` |
 | `language_content` | `topic`、`language`、`word_count`、`punctuation`、`repetition`、`filler` |
+
+其中 `language_content.language` 由 FireRed LID 音频模型产出（`firered_lid`
+stage），其余 `language_content` 字段由确定性文本工具产出。
+`sound_field_scene.external_noise_type` 由 DASS 音频模型产出（`dass`
+stage），值为 docs/DASS.md 类别键数组（见下方约束 bullet）。DASS 是
+默认链路的背景噪音主模型。排除策略是全有/全无的，传 `--no-exclusion`
+时全部关闭。PANNs 不再默认启用，
+但仍可通过 `--only-tags panns` 或 `--only-tags sound_field_scene.sound`
+显式运行，产出 `sound_field_scene.sound`（保留字段）。
+Brouhaha 的 C50 预测只作为内部 evidence（`internal.brouhaha_c50_db`）用于
+与 `room_acoustic.c50_db` 交叉验证，不进入公开输出。
 
 ## 全局原则
 
@@ -81,25 +94,33 @@
     "sample_rate_hz": null,
     "channels": null,
     "silence_segments": null,
-    "silence_ratio": null,
+    "silence_ratio": null
+  },
+  "audio_quality": {
     "snr_db": null,
-    "c50": null,
     "dnsmos_sig": null,
     "dnsmos_bak": null,
     "dnsmos_ovrl": null,
     "dnsmos_p808": null
   },
-  "sound_field_scene": {
+  "room_acoustic": {
     "far_field": null,
-    "rt60": null,
-    "c50": null,
-    "audio_events": null,
-    "music": null,
-    "sound": null
+    "rt60_sec": null,
+    "c50_db": null
+  },
+  "sound_field_scene": {
+    "speech_music_events": null,
+    "music_present": null,
+    "sound": null,
+    "external_noise_type": null,
+    "noise_composition": null
   },
   "speaker": {
+    "speaker_count": null,
     "multi_speaker": null,
+    "speaker_change_count": null,
     "speaker_change": null,
+    "overlap_ratio": null,
     "speaker_overlap": null
   },
   "language_content": {
@@ -116,10 +137,11 @@
 约束：
 
 - 最终输出不得包含 raw input、`sample_id`、工具标识、方法、状态、来源、证据、置信度、warning、rationale、prompt、模型名或审计结论。
-- Rec-RIR 生成的 RIR 波形不得进入公开输出；pipeline 只公开由该波形计算出的 `sound_field_scene.rt60` 和 `sound_field_scene.c50`，波形保存为内部 artifact。
-- `sound_field_scene.audio_events` 是 FireRed AED 检出的 `speech`、`singing`、`music` 类别数组；`sound_field_scene.sound` 是 PANNs 达到阈值的 AudioSet 背景声显示名称数组。成功但没有检出时输出空数组，工具失败时输出 `null`；模型分数、比例和时间段不进入公开输出。
+- Rec-RIR 生成的 RIR 波形不得进入公开输出；pipeline 只公开由该波形计算出的 `room_acoustic.rt60_sec` 和 `room_acoustic.c50_db`，波形保存为内部 artifact。
+- `sound_field_scene.speech_music_events` 是 FireRed AED 检出的 `speech`、`singing`、`music` 类别数组；`sound_field_scene.music_present` 是该数组是否包含 `music` 的布尔值；`sound_field_scene.sound` 是 PANNs 达到阈值的 AudioSet 背景声显示名称数组（panns stage 需显式选择，默认不启用）；`sound_field_scene.external_noise_type` 是 DASS 检出的 docs/DASS.md 类别键数组：`music`、`animal`、`mechanical`、`nature`、`formless`、`channel_environment`（人类声音与未归类标签永不公开），由全量 527 类向量中未被排除（主语音、Silence、声学场景、混响、回声）且达到 `--dass-threshold`（默认 0.25）的标签归组而来，按各类别最高分降序排列。成功但没有检出时输出空数组，工具失败时输出 `null`；模型分数、比例和时间段不进入公开输出。
+- `sound_field_scene.noise_composition` 是 DASS 全量 527 类 sigmoid 输出按 docs/DASS.md 类别归组后的背景声组成对象，固定含 `music`、`animal`、`mechanical`、`nature`、`formless`、`channel_environment` 六个键，每键为按分数降序的标签名数组（每类最多 `--dass-composition-top-k` 个，默认 3；入组阈值 `--dass-composition-threshold`，默认 0.3，与 `external_noise_type` 的 0.25 阈值相互独立）。音乐类别以 FireRed AED 为准：`music_present` 为 `false` 时输出空数组，为 `true` 或 AED 未运行（`null`）时输出 DASS 音乐类标签；人类声音与未归类标签只进内部 evidence（`category_events`），不进入公开输出。类别分数、证据和 AED 门控状态不进入公开输出。
 - 字段缺失、无法可靠判断或对应程序输出非法时，字段值必须为 `null`。
-- 同名字段如果位于不同路径，按不同 tag 处理。例如 `basic_acoustic.c50` 和 `sound_field_scene.c50` 不得跨字段复制，除非 registry 明确登记同一程序同时产出两个字段。
+- `audio_quality` 与 `room_acoustic` 是独立分组，字段不得跨组复制。Brouhaha C50（内部 `internal.brouhaha_c50_db`）只作为内部 evidence，不进入公开输出；公开的 `room_acoustic.c50_db` 只能来自 Rec-RIR 派生的 C50 估计。
 
 ## 工具开发
 

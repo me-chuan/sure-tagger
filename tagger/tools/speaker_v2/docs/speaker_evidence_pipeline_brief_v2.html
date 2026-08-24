@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="author" content="Sure-Tagger">
+  <meta name="description" content="Speaker v2 claim-aware shadow pipeline engineering brief">
+  <title>Sure-Tagger Speaker v2 Claim-aware Shadow Pipeline</title>
+  <style>
+    /* Register the installed CJK font explicitly.  Relying on implicit glyph
+       fallback made raster/PDF renderers show missing-glyph boxes in Chinese. */
+    @font-face {
+      font-family: "Speaker CJK";
+      src: url("file:///usr/share/fonts/google-droid/DroidSansFallback.ttf") format("truetype");
+      font-style: normal;
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: "Speaker CJK";
+      src: url("file:///usr/share/fonts/google-droid/DroidSansFallback.ttf") format("truetype");
+      font-style: normal;
+      font-weight: 700;
+    }
+    @page {
+      size: A4 portrait;
+      margin: 16mm 17mm 14mm;
+      background: #fbfbfb;
+      @top-left {
+        content: "Sure-Tagger Speaker v2 Claim-aware Shadow Pipeline";
+        color: #52626d;
+        font-family: "Droid Sans", "Speaker CJK", "DejaVu Sans", sans-serif;
+        font-size: 8pt;
+      }
+      @top-right {
+        content: "工程接入版 · 2026-08-17";
+        color: #52626d;
+        font-family: "Droid Sans", "Speaker CJK", "DejaVu Sans", sans-serif;
+        font-size: 8pt;
+      }
+      @bottom-center {
+        content: counter(page);
+        color: #52626d;
+        font-family: "Droid Sans", "Speaker CJK", "DejaVu Sans", sans-serif;
+        font-size: 8.5pt;
+      }
+    }
+    @page cover {
+      size: A4 portrait;
+      margin: 0;
+      background: #fbfbfb;
+      @top-left { content: ""; }
+      @top-right { content: ""; }
+      @bottom-center { content: ""; }
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #fbfbfb;
+      color: #1f2b33;
+      font-family: "Droid Sans", "Speaker CJK", "Droid Sans Fallback", "DejaVu Sans", sans-serif;
+      font-size: 9.8pt;
+      line-height: 1.52;
+    }
+    .cover {
+      page: cover;
+      height: 297mm;
+      padding: 46mm 24mm 18mm;
+      position: relative;
+      page-break-after: always;
+    }
+    .cover::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      height: 7mm;
+      background: #315d6b;
+    }
+    .eyebrow {
+      color: #a54d3d;
+      font-weight: 700;
+      font-size: 10pt;
+      letter-spacing: .02em;
+      margin-bottom: 11mm;
+    }
+    .cover h1 {
+      margin: 0;
+      color: #173642;
+      font-size: 25pt;
+      line-height: 1.22;
+      font-weight: 700;
+      max-width: 150mm;
+    }
+    .cover .subtitle {
+      margin-top: 12mm;
+      color: #52626d;
+      font-size: 13pt;
+      line-height: 1.5;
+      max-width: 160mm;
+    }
+    .rust-rule {
+      width: 32mm;
+      height: 1.3mm;
+      background: #a54d3d;
+      margin-top: 17mm;
+      margin-bottom: 13mm;
+    }
+    .metric-row {
+      border-top: .35pt solid #cad0d3;
+      border-bottom: .35pt solid #cad0d3;
+      display: flex;
+      margin-left: 0;
+      margin-right: 0;
+      padding: 7mm 0 6mm;
+    }
+    .metric { flex: 1; width: 25%; padding: 0 5mm 0 0; min-height: 22mm; }
+    .metric + .metric { border-left: .35pt solid #d5dcdf; padding-left: 5mm; }
+    .metric .big { color: #315d6b; font-size: 18pt; line-height: 1.1; font-weight: 700; }
+    .metric:first-child .big { font-size: 15pt; }
+    .metric .small { color: #52626d; font-size: 8.3pt; line-height: 1.35; margin-top: 2mm; }
+    .meta { margin-top: 13mm; color: #52626d; font-size: 9.3pt; line-height: 1.95; }
+    .meta strong { color: #173642; }
+    .cover-foot {
+      position: absolute;
+      left: 24mm;
+      right: 24mm;
+      bottom: 18mm;
+      color: #75828a;
+      font-size: 8pt;
+    }
+
+    .page { page: brief; page-break-after: always; min-height: 267mm; }
+    .page:last-child { page-break-after: auto; }
+    h2 {
+      color: #173642;
+      font-size: 14.5pt;
+      line-height: 1.25;
+      margin: 0 0 8mm;
+      font-weight: 700;
+    }
+    h3 {
+      color: #315d6b;
+      font-size: 11.5pt;
+      line-height: 1.3;
+      margin: 6mm 0 3mm;
+    }
+    p { margin: 0 0 4mm; }
+    .lead {
+      border-left: 2.5pt solid #a54d3d;
+      background: #f2f4f5;
+      padding: 4mm 5mm;
+      margin: 0 0 7mm;
+    }
+    .lead p:last-child { margin-bottom: 0; }
+    .muted { color: #52626d; }
+    .rust { color: #a54d3d; }
+    code {
+      color: #a54d3d;
+      background: #f2f4f5;
+      padding: .5pt 2pt;
+      font-family: "DejaVu Sans Mono", "Speaker CJK", monospace;
+      font-size: .92em;
+    }
+    ul, ol { margin: 2mm 0 5mm 6mm; padding-left: 5mm; }
+    li { margin: 1.5mm 0; }
+    .tight li { margin: .8mm 0; }
+    .section-rule { height: .4pt; background: #cad0d3; margin: 6mm 0; }
+    .two-col { display: flex; }
+    .two-col > * { flex: 1; width: 0; }
+    .two-col > * + * { margin-left: 7mm; }
+    .three-col { display: flex; }
+    .three-col > * { flex: 1; width: 0; }
+    .three-col > * + * { margin-left: 4mm; }
+    .card {
+      border: .6pt solid #c7d0d5;
+      border-radius: 3mm;
+      background: #fff;
+      padding: 4mm;
+    }
+    .card.blue { background: #e7f1f4; border-color: #8daeb9; }
+    .card.green { background: #e8f2ea; border-color: #9abda5; }
+    .card.yellow { background: #fff2da; border-color: #d9b36c; }
+    .card.red { background: #f9e9e5; border-color: #d69b91; }
+    .card.purple { background: #eee7f4; border-color: #b8a4c7; }
+    .card h4 { margin: 0 0 1.5mm; color: #173642; font-size: 10.2pt; }
+    .card p { margin: 0; color: #52626d; font-size: 8.6pt; line-height: 1.45; }
+    .toc { margin-top: 11mm; border-top: 1.2pt solid #315d6b; padding-top: 7mm; }
+    .toc h2 { font-size: 23pt; margin-bottom: 13mm; }
+    .toc-row { display: flex; align-items: baseline; margin: 0 0 5mm; font-size: 10pt; }
+    .toc-row .dots { flex: 1; border-bottom: .5pt dotted #cad0d3; margin: 0 3mm 1.3mm; }
+    .toc-row .num { color: #52626d; }
+    .callout {
+      border: .6pt solid #cad0d3;
+      border-radius: 3mm;
+      background: #f3f6f7;
+      padding: 4mm 5mm;
+      margin: 4mm 0;
+    }
+    .callout strong { color: #173642; }
+    .small-note { color: #75828a; font-size: 8.2pt; line-height: 1.45; }
+    table { width: 100%; border-collapse: collapse; margin: 3mm 0 5mm; font-size: 8.3pt; line-height: 1.35; }
+    th { background: #315d6b; color: #fff; font-weight: 700; text-align: left; padding: 2.3mm 2.4mm; border: .35pt solid #315d6b; }
+    td { padding: 2.3mm 2.4mm; border: .35pt solid #c7d0d5; vertical-align: top; }
+    tbody tr:nth-child(even) td { background: #f3f6f7; }
+    .status-pass { color: #39785a; font-weight: 700; }
+    .status-warn { color: #ae7423; font-weight: 700; }
+    .status-block { color: #a54d3d; font-weight: 700; }
+    .flow-frame { border: .6pt solid #bcc9ce; background: #fff; padding: 4mm 4mm 3mm; margin: 0 0 4mm; }
+    .flow-frame img { display: block; width: 100%; height: 160mm; object-fit: fill; }
+    .caption { border-top: .35pt solid #d5dcdf; padding-top: 2.5mm; font-size: 8.1pt; line-height: 1.45; color: #52626d; }
+    .caption strong { color: #173642; }
+    .numbered { counter-reset: item; list-style: none; margin-left: 0; padding-left: 0; }
+    .numbered li { counter-increment: item; padding-left: 7mm; position: relative; }
+    .numbered li::before { content: counter(item) "."; position: absolute; left: 0; color: #52626d; }
+    .code-block { border-left: 2.5pt solid #397b99; background: #f2f4f5; padding: 4mm 5mm; font-family: "DejaVu Sans Mono", "Speaker CJK", monospace; font-size: 8.4pt; line-height: 1.55; white-space: pre-wrap; }
+    .route-chip { display: inline-block; border-radius: 2mm; padding: 1mm 2mm; font-size: 8pt; margin: 0 1mm 1mm 0; background: #e7f1f4; color: #315d6b; }
+    .route-chip.green { background: #e8f2ea; color: #39785a; }
+    .route-chip.yellow { background: #fff2da; color: #9a681f; }
+    .route-chip.red { background: #f9e9e5; color: #a54d3d; }
+    .route-chip.purple { background: #eee7f4; color: #725487; }
+    .big-number { font-size: 17pt; line-height: 1; font-weight: 700; color: #315d6b; }
+    .metric-card { min-height: 24mm; }
+    .metric-card .label { color: #52626d; font-size: 8.1pt; margin-top: 2mm; }
+    .smoke-table td:first-child { width: 25%; color: #173642; font-weight: 700; }
+    .gate-table td:first-child { width: 17%; color: #173642; font-weight: 700; }
+    .footer-note { margin-top: 5mm; color: #75828a; font-size: 8.2pt; }
+  </style>
+</head>
+<body>
+
+  <!-- Cover -->
+  <section class="cover">
+    <div class="eyebrow">工程接入版 · Claim-aware 路由 · 可回滚 Shadow</div>
+    <h1>Sure-Tagger Speaker v2<br>Claim-aware Shadow Pipeline</h1>
+    <div class="subtitle">从全 timeline 等权，升级为按 claim 分工取证的 utterance-level 证据链路</div>
+    <div class="rust-rule"></div>
+    <div class="metric-row">
+      <div class="metric"><div class="big">C / M / O / X</div><div class="small">四类 speaker claim<br>逐 claim 独立路由</div></div>
+      <div class="metric"><div class="big">I + V</div><div class="small">身份比较与语音覆盖<br>不混入事件票</div></div>
+      <div class="metric"><div class="big">3 profiles</div><div class="small">legacy · quality · lean<br>默认仍是 legacy</div></div>
+      <div class="metric"><div class="big">70 / 70</div><div class="small">speaker-v2 扩展测试<br>当前工程回归</div></div>
+    </div>
+    <div class="meta">
+      <div><strong>版本：</strong>工程接入版 · 2026-08-17</div>
+      <div><strong>默认：</strong><code>legacy-shadow</code>；<code>quality-shadow</code> 需显式启用</div>
+      <div><strong>公开输出：</strong>shadow 阶段 public adapter disabled，speaker 字段保持 <code>null</code></div>
+    </div>
+    <div class="cover-foot">输入固定为当前 utterance 的 <code>sample.audio.path</code>；native/gold/reference 只允许 post-inference 评测，证据门禁未齐即 abstain。</div>
+  </section>
+
+  <!-- Contents -->
+  <section class="page toc">
+    <h2>目录</h2>
+    <div class="toc-row"><span>1. v2 核心变化</span><span class="dots"></span><span class="num">3</span></div>
+    <div class="toc-row"><span>2. Pipeline</span><span class="dots"></span><span class="num">4</span></div>
+    <div class="toc-row"><span>3. Claim-aware 路由</span><span class="dots"></span><span class="num">5</span></div>
+    <div class="toc-row"><span>4. Evidence 与 artifact contract</span><span class="dots"></span><span class="num">6</span></div>
+    <div class="toc-row"><span>5. 真实 smoke 验证</span><span class="dots"></span><span class="num">7</span></div>
+    <div class="toc-row"><span>6. 发布边界与下一步</span><span class="dots"></span><span class="num">8</span></div>
+    <div class="section-rule"></div>
+    <div class="lead">
+      <p><strong>一句话结论：</strong>v2 不是“再加几路模型投票”，而是把 timeline、身份、覆盖和校准拆成可审计证据角色，再用版本化 policy 决定每个 claim 的 primary、guard、fallback 与 excluded source。</p>
+      <p class="small-note">当前交付定位为 engineering shadow：接口、路由、artifact 和回滚已接入；1k fusion、非 AMI 与 production gate 尚未通过。</p>
+    </div>
+    <div class="three-col" style="margin-top: 18mm;">
+      <div class="card blue"><h4>输入边界</h4><p>只读当前 utterance 音频，范围为 <code>[0, duration]</code>。</p></div>
+      <div class="card purple"><h4>决策边界</h4><p>guards 第一版只记录诊断，不额外计票。</p></div>
+      <div class="card red"><h4>发布边界</h4><p><code>supported/conflicted/insufficient</code> 均映射为 <code>null</code>。</p></div>
+    </div>
+  </section>
+
+  <!-- Core change -->
+  <section class="page">
+    <h2>1. v2 核心变化</h2>
+    <div class="lead">
+      <p><strong>目标：</strong>在不改变 utterance-level 输入契约的前提下，将“所有 timeline 对所有标签等权”改为 claim-aware resolver；同时把 ECAPA 身份链路、Brouhaha 覆盖链路和可复现 artifact 接入同一 shadow 框架。</p>
+      <p class="small-note">policy：<code>speaker_v2.claim_policy.20260817.1</code> · 默认 profile：<code>legacy-shadow</code> · public adapter：disabled</p>
+    </div>
+    <table>
+      <thead><tr><th>维度</th><th>旧 v2 行为</th><th>Speaker v2 claim-aware 行为</th></tr></thead>
+      <tbody>
+        <tr><td>证据组织</td><td>timeline 列表基本全局参与，标签从共同摘要派生。</td><td>每个 claim 显式配置 primary / guard / fallback / excluded。</td></tr>
+        <tr><td>冲突处理</td><td>依赖 evidence 顺序或总置信度继续融合。</td><td>先冻结 claim-local H1/H2/H<sub>other</sub> prediction，再调用高区分度独立检查。</td></tr>
+        <tr><td>身份与覆盖</td><td>身份、VAD 容易被误当成 speaker event 票。</td><td>ECAPA/CAM++ 只做 I；Brouhaha/FireRed 只做 V；能力边界写入 evidence。</td></tr>
+        <tr><td>失败回退</td><td>模型缺失可能影响全局链路。</td><td>只触发该 claim 的有序 fallback；其他 claim 保持各自路由。</td></tr>
+        <tr><td>可复现性</td><td>运行 profile 和模型职责不够显式。</td><td>fusion / certification / run manifest 固化 profile、policy version/hash、lineage 和模型 inventory。</td></tr>
+      </tbody>
+    </table>
+    <h3>冻结的工程原则</h3>
+    <div class="two-col">
+      <div class="card blue"><h4>Sample-local scope</h4><p>只读取当前 <code>sample.audio.path</code>；不拼接相邻 utterance，不借用跨音频 speaker ID、embedding 或 transcript。</p></div>
+      <div class="card green"><h4>Evidence independence</h4><p>共享 checkpoint、joint generation 或派生字段不重复计票；dependency group 和 lineage 进入 artifact。</p></div>
+      <div class="card yellow"><h4>Conservative certification</h4><p>独立事件、event alignment、identity、coverage、域校准与 joint-negative gate 缺一不可。</p></div>
+      <div class="card purple"><h4>Shadow first</h4><p><code>certified</code> 才可发布 bool；当前所有新 profile 仍保持 public speaker 为 <code>null</code>。</p></div>
+    </div>
+    <h3>1k standalone 选型依据（不是融合结果）</h3>
+    <div class="three-col">
+      <div class="card"><div class="big-number">1,000</div><div class="label">utterances · 167 meetings · 7.7514 h</div></div>
+      <div class="card"><div class="big-number">23,815</div><div class="label">identity trials（meeting/global speaker 隔离）</div></div>
+      <div class="card"><div class="big-number">8 路</div><div class="label">模型 inventory · 3 个可选 profile</div></div>
+    </div>
+  </section>
+
+  <!-- Pipeline -->
+  <section class="page">
+    <h2>2. Pipeline</h2>
+    <div class="flow-frame">
+      <img src="speaker_v2_pipeline_flow.png" alt="Speaker v2 claim-aware shadow pipeline flowchart">
+      <div class="caption"><strong>图 1｜Speaker v2 claim-aware shadow pipeline。</strong> 蓝色为 timeline/event evidence，绿色为 identity 与 claim check，黄色为 coverage，红色为 lexical / boundary audit，紫色为 policy 与假设节点。实线表示 primary/正常流转；虚线表示 guard 或定向回流。native metadata、gold 与 reference 不进入 inference/resolver。</div>
+    </div>
+    <p><strong>实际执行分四段：</strong></p>
+    <ol class="numbered tight">
+      <li>读取当前 utterance 的 <code>sample.audio.path</code>，计算 duration、audio hash 和 sample-local scope。</li>
+      <li>并行启动 profile 允许的 adapters：MOSS、Sortformer、pyannote、Brouhaha/FireRed、ECAPA，以及可选 Whisper lexical audit。</li>
+      <li>统一 timebase、匿名 speaker ID、dependency groups 和 contract；随后按 claim policy 选择 candidate 与 fallback。</li>
+      <li>经过 identity / coverage / calibration / dependency closure 后写入 fusion、certification、run manifest；shadow public adapter 保持 disabled。</li>
+    </ol>
+  </section>
+
+  <!-- Routing -->
+  <section class="page">
+    <h2>3. Claim-aware 路由</h2>
+    <p class="muted">交叉验证不是模型数量，而是不同证据角色共同满足一个 claim。以下是 <code>quality-shadow</code> 的冻结路由；guard 当前只写诊断，<code>guards_affect_candidate=false</code>。</p>
+    <table>
+      <thead><tr><th style="width:12%">Claim</th><th style="width:22%">Primary</th><th style="width:27%">Guard / secondary</th><th style="width:27%">Fallback / excluded</th><th style="width:12%">输出</th></tr></thead>
+      <tbody>
+        <tr><td><strong>C</strong><br><code>speaker_count</code></td><td>Sortformer</td><td>—</td><td>MOSS fallback<br><span class="small-note">pyannote excluded（diagnostic）</span></td><td>内部 count candidate</td></tr>
+        <tr><td><strong>M</strong><br><code>multi_speaker</code></td><td>Sortformer</td><td>MOSS negative false-positive guard</td><td>无 fallback<br><span class="small-note">pyannote excluded</span></td><td>事件候选</td></tr>
+        <tr><td><strong>O</strong><br><code>speaker_overlap</code></td><td>pyannote<br><span class="small-note">license pending，shadow only</span></td><td>Sortformer secondary witness；MOSS positive-only corroboration</td><td>Sortformer fallback<br><span class="small-note">MOSS negative 不得 veto</span></td><td>重叠候选</td></tr>
+        <tr><td><strong>X</strong><br><code>speaker_change</code></td><td>MOSS<br><span class="small-note">count / localization</span></td><td>Sortformer recall witness</td><td>Sortformer fallback<br><span class="small-note">pyannote excluded</span></td><td>change 候选</td></tr>
+      </tbody>
+    </table>
+    <h3>I / V 是独立 specialist lane</h3>
+    <div class="two-col">
+      <div class="card green">
+        <h4>I · speaker identity comparison</h4>
+        <p><strong>ECAPA primary：</strong>从 C policy 选出的 predicted timeline 盲选 non-overlap regions，输出 comparison；拒绝 native/gold/reference 字段，不产生 C/M/O/X/V 票。CAM++ 保留 legacy / 中文 fallback。</p>
+      </div>
+      <div class="card yellow">
+        <h4>V · speech coverage</h4>
+        <p><strong>Brouhaha primary：</strong>只声明 <code>speech_coverage</code>；FireRedVAD 保留为 low-FA / boundary guard。两者都不能直接产生 speaker event vote。</p>
+      </div>
+    </div>
+    <h3>三个运行 profile</h3>
+    <table>
+      <thead><tr><th>Profile</th><th>启用模型</th><th>定位</th></tr></thead>
+      <tbody>
+        <tr><td><code>legacy-shadow</code></td><td>MOSS / FireRed / CAM++ / Whisper / Sortformer / pyannote</td><td>回滚与兼容基线；ECAPA/Brouhaha 关闭</td></tr>
+        <tr><td><code>quality-shadow</code></td><td>MOSS / FireRed / Sortformer / pyannote / ECAPA / Brouhaha</td><td>候选质量 profile；CAM++/Whisper 关闭</td></tr>
+        <tr><td><code>lean-shadow</code></td><td>Sortformer / pyannote / ECAPA / Brouhaha</td><td>成本优先；X 退化为 Sortformer 单路</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Evidence and artifacts -->
+  <section class="page">
+    <h2>4. Evidence 与 artifact contract</h2>
+    <div class="two-col">
+      <div>
+        <h3>能力边界</h3>
+        <table>
+          <thead><tr><th>Evidence lane</th><th>允许回答</th></tr></thead>
+          <tbody>
+            <tr><td>Timeline / event</td><td>MOSS、Sortformer、pyannote：C/M/O/X candidate 与局部事件。</td></tr>
+            <tr><td>Identity</td><td>ECAPA / CAM++：候选片段是否为不同 speaker；不产 timeline。</td></tr>
+            <tr><td>Coverage</td><td>Brouhaha / FireRed：speech union、silence、边界与覆盖分母。</td></tr>
+            <tr><td>Lexical / audit</td><td>Whisper：词/段时间与边界歧义；不构成 speaker vote。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <h3>四种 certification 状态</h3>
+        <table>
+          <thead><tr><th>状态</th><th>公开映射</th></tr></thead>
+          <tbody>
+            <tr><td class="status-pass">certified</td><td>所有 event / identity / coverage / calibration gate 通过 → bool</td></tr>
+            <tr><td class="status-warn">supported</td><td>有单边支持但认证角色不足 → <code>null</code></td></tr>
+            <tr><td class="status-block">conflicted</td><td>合格来源冲突 → <code>null</code>，定向复核</td></tr>
+            <tr><td>insufficient</td><td>输入、适用性或质量不足 → <code>null</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <h3>可重放 artifact</h3>
+    <table>
+      <thead><tr><th>Artifact</th><th>固定内容</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td>Evidence</td><td>模型版本 / SHA256、capabilities、scope、audio hash、runtime、dependency groups</td><td>逐路审计与失败定位</td></tr>
+        <tr><td>Fusion</td><td>完整 claims、route decision source、fallback reason、guard/excluded observations</td><td>解释每个 claim 如何得出</td></tr>
+        <tr><td>Certification</td><td>policy version/hash、状态、public adapter 映射</td><td>确定性发布边界</td></tr>
+        <tr><td>Run manifest</td><td>profile defaults、8 路 enabled/disabled、配置、禁用原因、policy hash</td><td>复现、回滚与部署审计</td></tr>
+      </tbody>
+    </table>
+    <div class="code-block">native_metadata_entered_inference = false
+input_transcript_entered_resolver = false
+public_adapter.enabled = false
+guards_affect_candidate = false</div>
+    <p class="footer-note">旧 artifact 路径与公共 worker 保留；新版本通过 profile 切换回滚，不物理删除模型、runtime 或历史结果。</p>
+  </section>
+
+  <!-- Smoke -->
+  <section class="page">
+    <h2>5. 真实 smoke：quality-shadow</h2>
+    <div class="lead">
+      <p><strong>这是集成 smoke，不是上线结论。</strong> 在无可用 GPU 的节点上，以 CPU 跑通一条包含多人、重叠和 speaker change 的 AMI utterance；native 标注只在 inference 后用于 evaluation-only 对照。</p>
+    </div>
+    <div class="three-col">
+      <div class="card blue metric-card"><div class="big-number">24.019 s</div><div class="label">EN2001a_utterance_00054</div></div>
+      <div class="card green metric-card"><div class="big-number">1 / 1</div><div class="label">success / failure</div></div>
+      <div class="card purple metric-card"><div class="big-number">70 / 70</div><div class="label">speaker-v2 tests pass</div></div>
+    </div>
+    <table class="smoke-table">
+      <thead><tr><th>检查项</th><th>真实结果</th></tr></thead>
+      <tbody>
+        <tr><td>Evidence status</td><td>MOSS、Sortformer、pyannote、FireRed、ECAPA、Brouhaha 均为 <code>estimated</code>；CAM++ / Whisper 按 profile 明确 disabled。</td></tr>
+        <tr><td>实际 route source</td><td>C = Sortformer；M = Sortformer；O = pyannote；X = MOSS，符合 quality policy。</td></tr>
+        <tr><td>Evaluation-only</td><td>MOSS/Sortformer count=3，pyannote count=2；三路 M/O/X bool 与 native reference 一致，但 native 未进入 resolver。</td></tr>
+        <tr><td>ECAPA I</td><td>4 个 predicted non-overlap regions、6 个 comparisons；native metadata 未进入；predicted-region gate=false，counts_for_certification=false。</td></tr>
+        <tr><td>Brouhaha V</td><td>coverage ratio <strong>0.786535</strong>；FireRed 对照 <strong>0.721096</strong>；只提供 speech_coverage。</td></tr>
+        <tr><td>Certification / public</td><td>四个内部 claim 均为 <span class="status-warn">supported</span>，不是 certified；public speaker 字段全部为 <code>null</code>。</td></tr>
+      </tbody>
+    </table>
+    <div class="two-col">
+      <div class="card yellow"><h4>已知运行提示</h4><p>pyannote TorchCodec、Brouhaha 训练 runtime 版本和 Matplotlib cache 警告；没有导致该条 evidence 缺失，仍需纳入后续稳定性门禁。</p></div>
+      <div class="card blue"><h4>产物一致性</h4><p>fusion、certification、run manifest 的 profile / policy version / policy hash 一致；部署清单已登记 smoke 结果与 SHA256。</p></div>
+    </div>
+  </section>
+
+  <!-- Release -->
+  <section class="page">
+    <h2>6. 发布边界与下一步</h2>
+    <table class="gate-table">
+      <thead><tr><th>Gate</th><th>当前状态</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>G0 · assets</td><td class="status-pass">PASS</td><td>新模型 checkpoint / runtime hash 已核验。</td></tr>
+        <tr><td>G1 · adapters</td><td class="status-pass">PASS</td><td>工程接线、worker、artifact 和 70/70 speaker-v2 回归通过。</td></tr>
+        <tr><td>G2 · integrated shadow</td><td class="status-warn">PARTIAL</td><td>已通过 1 条真实 quality smoke；分层 smoke 与 1k fusion 尚未完成。</td></tr>
+        <tr><td>G3 · calibration / non-AMI</td><td class="status-block">BLOCKED</td><td>ECAPA predicted-region、1k ablation、非 AMI meeting-separated 和 pyannote license 待补。</td></tr>
+        <tr><td>G4 · production</td><td class="status-block">BLOCKED</td><td>统计 CI、失败率、资源成本、最终 manifest 审核和默认切换均未开始。</td></tr>
+      </tbody>
+    </table>
+    <h3>建议执行顺序</h3>
+    <ol class="numbered tight">
+      <li>在同一冻结 1k manifest 上跑 legacy / quality / lean 三 profile 的 fusion、ablation 与 parity。</li>
+      <li>完成 ECAPA predicted-region I 端到端 coverage、abstain、EER/minDCF 和 CAM++ 同口径对照。</li>
+      <li>补齐 10 条分层 smoke、failure injection、RTF、CPU/GPU、峰值/常驻内存与失败率。</li>
+      <li>使用 meeting-separated 非 AMI 数据复核 C/M/O/X/V，并完成 pyannote license review。</li>
+      <li>冻结 calibration / CI / cost / rollback 后，再决定是否将默认 profile 切到 quality-shadow。</li>
+    </ol>
+    <div class="callout">
+      <p><strong>回滚：</strong>只需切换到 <code>--profile legacy-shadow</code>。旧模型、ECAPA/Brouhaha 资产、公共 subprocess worker、历史 artifact 和 2026-08-13 snapshot 均保留。</p>
+      <p class="small-note">当前部署清单：<code>.deploy/speaker_v2/deployment_manifest_20260817.json</code> · production_approved=false · public_adapter_enabled=false。</p>
+    </div>
+    <div class="footer-note">最终原则：先把证据链路做成可审计、可回放、可回滚，再用 1k 与非 AMI 门禁决定默认模型选择；在此之前不做物理清理。</div>
+  </section>
+
+</body>
+</html>

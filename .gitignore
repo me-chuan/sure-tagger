@@ -71,3 +71,10 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Copied data dir and deployment artifacts (machine-local, not source)
+/dataset/
+/.deploy/
+/tagger/tools/speaker_v2/evalue/audio_wav_16k_mono/
+/tagger/tools/speaker_v2/evalue/data/
+/tagger/tools/speaker_v2/evalue/outputs/

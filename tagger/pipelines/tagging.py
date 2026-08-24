@@ -15,23 +15,36 @@ from typing import Any, Dict, List, Optional, Union
 from tagger.input_schema import InputSchemaError, validate_input_record
 from tagger.tools.base import ToolResult
 from tagger.tools.subprocess_runner import close_subprocess_workers
-from tagger.tools.basic_acoustic.brouhaha_signal_estimator import BrouhahaConfig
-from tagger.tools.basic_acoustic.dnsmos_quality_estimator import DnsmosConfig
+from tagger.tools.audio_quality.brouhaha_signal_estimator import BrouhahaConfig
+from tagger.tools.audio_quality.dnsmos_quality_estimator import DnsmosConfig
 from tagger.tools.basic_acoustic.firered_vad_silence_detector import FireRedVadConfig
 from tagger.tools.basic_acoustic.registry import (
     AUDIO_PROBE_TOOL,
-    BROUHAHA_ACOUSTIC_TOOL,
-    DNSMOS_QUALITY_TOOL,
     FIRERED_VAD_SILENCE_TOOL,
     NATIVE_METADATA_VAD_TOOL,
     SILENCE_RATIO_TOOL,
 )
-from tagger.tools.sound_field_scene.registry import (
+from tagger.tools.audio_quality.registry import (
+    BROUHAHA_ACOUSTIC_TOOL,
+    DNSMOS_QUALITY_TOOL,
+)
+from tagger.tools.room_acoustic.registry import (
     C50_TOOL,
-    FIRERED_AED_TOOL,
-    PANNS_BACKGROUND_TOOL,
     RECRIR_RIR_TOOL,
     RT60_TOOL,
+)
+from tagger.tools.sound_field_scene.registry import (
+    DASS_NOISE_TYPE_TOOL,
+    FIRERED_AED_TOOL,
+    PANNS_BACKGROUND_TOOL,
+)
+from tagger.tools.sound_field_scene.dass_categories import (
+    NOISE_COMPOSITION_AUDIT_MAX_ITEMS,
+    PUBLIC_COMPOSITION_CATEGORIES,
+    classify_dass_label,
+)
+from tagger.tools.sound_field_scene.dass_noise_type_detector import (
+    DassNoiseTypeConfig,
 )
 from tagger.tools.sound_field_scene.firered_aed_detector import (
     EVENT_NAMES,
@@ -41,27 +54,24 @@ from tagger.tools.sound_field_scene.panns_background_detector import (
     TOP_EVENTS_LIMIT,
     PannsBackgroundConfig,
 )
-from tagger.tools.sound_field_scene.rir_estimator import (
+from tagger.tools.room_acoustic.rir_estimator import (
     RecRirConfig,
     validate_rir_payload,
 )
-from tagger.tools.speaker.artifacts import write_speaker_artifact
-from tagger.tools.speaker.config import SpeakerLayerConfig, default_speaker_layer_config
-from tagger.tools.speaker.metrics import (
-    SpeakerMetricsConfig,
-    build_metadata_from_channel_activity,
-    build_metadata_from_timeline,
+from tagger.pipelines.speaker_evidence import (
+    SpeakerEvidenceConfig,
+    default_speaker_evidence_config,
+    run_record as run_speaker_v2_record,
 )
-from tagger.tools.speaker.registry import (
-    CHANNEL_ACTIVITY_TOOL,
-    MOSS_DIARIZE_TOOL,
-    NATIVE_METADATA_DIARIZE_TOOL,
-    SPEAKER_METRICS_TOOL,
+from tagger.tools.speaker_v2.profiles import (
+    available_profiles as available_speaker_profiles,
 )
 from tagger.tools.language_content.registry import (
     DETERMINISTIC_LANGUAGE_CONTENT_TOOL,
+    FIRERED_LID_LANGUAGE_CONTENT_TOOL,
     TOPIC_LANGUAGE_CONTENT_TOOL,
 )
+from tagger.tools.language_content.firered_lid_detector import FireRedLidConfig
 from tagger.tools.language_content.topic import TopicConfig
 
 
@@ -71,26 +81,36 @@ BASIC_ACOUSTIC_FIELDS = {
     "channels": None,
     "silence_ratio": None,
     "silence_segments": None,
+}
+
+AUDIO_QUALITY_FIELDS = {
     "snr_db": None,
-    "c50": None,
     "dnsmos_sig": None,
     "dnsmos_bak": None,
     "dnsmos_ovrl": None,
     "dnsmos_p808": None,
 }
 
-SOUND_FIELD_SCENE_FIELDS = {
+ROOM_ACOUSTIC_FIELDS = {
     "far_field": None,
-    "rt60": None,
-    "c50": None,
-    "audio_events": None,
-    "music": None,
+    "rt60_sec": None,
+    "c50_db": None,
+}
+
+SOUND_FIELD_SCENE_FIELDS = {
+    "speech_music_events": None,
+    "music_present": None,
     "sound": None,
+    "external_noise_type": None,
+    "noise_composition": None,
 }
 
 SPEAKER_FIELDS = {
+    "speaker_count": None,
     "multi_speaker": None,
+    "speaker_change_count": None,
     "speaker_change": None,
+    "overlap_ratio": None,
     "speaker_overlap": None,
 }
 
@@ -112,8 +132,13 @@ STAGE_BROUHAHA = "brouhaha"
 STAGE_DNSMOS = "dnsmos"
 STAGE_FIRERED_AED = "firered_aed"
 STAGE_PANNS = "panns"
+STAGE_DASS = "dass"
 STAGE_RECRIR = "recrir"
+STAGE_FIRERED_LID = "firered_lid"
 
+# PANNs is not part of the default full pipeline (DASS is the primary
+# background-noise source). The stage stays registered so it can still be
+# selected explicitly with --only-tags panns or sound_field_scene.sound.
 FULL_STAGES = [
     STAGE_LANGUAGE_DETERMINISTIC,
     STAGE_TOPIC,
@@ -123,8 +148,9 @@ FULL_STAGES = [
     STAGE_BROUHAHA,
     STAGE_DNSMOS,
     STAGE_FIRERED_AED,
-    STAGE_PANNS,
+    STAGE_DASS,
     STAGE_RECRIR,
+    STAGE_FIRERED_LID,
 ]
 
 AUDIO_STAGES = set(
@@ -136,13 +162,14 @@ AUDIO_STAGES = set(
         STAGE_DNSMOS,
         STAGE_FIRERED_AED,
         STAGE_PANNS,
+        STAGE_DASS,
         STAGE_RECRIR,
+        STAGE_FIRERED_LID,
     ]
 )
 
 STAGE_TAG_PATHS = {
     STAGE_LANGUAGE_DETERMINISTIC: [
-        "language_content.language",
         "language_content.word_count",
         "language_content.punctuation",
         "language_content.repetition",
@@ -159,23 +186,31 @@ STAGE_TAG_PATHS = {
         "basic_acoustic.silence_ratio",
     ],
     STAGE_SPEAKER: [
+        "speaker.speaker_count",
         "speaker.multi_speaker",
+        "speaker.speaker_change_count",
         "speaker.speaker_change",
+        "speaker.overlap_ratio",
         "speaker.speaker_overlap",
     ],
-    STAGE_BROUHAHA: ["basic_acoustic.snr_db", "basic_acoustic.c50"],
+    STAGE_BROUHAHA: ["audio_quality.snr_db"],
     STAGE_DNSMOS: [
-        "basic_acoustic.dnsmos_sig",
-        "basic_acoustic.dnsmos_bak",
-        "basic_acoustic.dnsmos_ovrl",
-        "basic_acoustic.dnsmos_p808",
+        "audio_quality.dnsmos_sig",
+        "audio_quality.dnsmos_bak",
+        "audio_quality.dnsmos_ovrl",
+        "audio_quality.dnsmos_p808",
     ],
     STAGE_FIRERED_AED: [
-        "sound_field_scene.audio_events",
-        "sound_field_scene.music",
+        "sound_field_scene.speech_music_events",
+        "sound_field_scene.music_present",
     ],
     STAGE_PANNS: ["sound_field_scene.sound"],
-    STAGE_RECRIR: ["sound_field_scene.rt60", "sound_field_scene.c50"],
+    STAGE_DASS: [
+        "sound_field_scene.external_noise_type",
+        "sound_field_scene.noise_composition",
+    ],
+    STAGE_RECRIR: ["room_acoustic.rt60_sec", "room_acoustic.c50_db"],
+    STAGE_FIRERED_LID: ["language_content.language"],
 }
 
 IMPLEMENTED_TAG_PATHS = set(
@@ -191,20 +226,20 @@ def run_manifest(
     brouhaha_config=None,
     recrir_config=None,
     speaker_config=None,
-    moss_client=None,
-    channel_activity_client=None,
     artifact_dir=None,
     dnsmos_config=None,
     firered_aed_config=None,
     panns_config=None,
+    dass_config=None,
     topic_config=None,
     topic_client=None,
+    firered_lid_config=None,
     sample_ids=None,
     existing_tags_path=None,
     selected_tag_paths=None,
     missing_only=False,
 ):
-    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerLayerConfig], Any, Any, Optional[Union[str, Path]], Optional[DnsmosConfig], Optional[FireRedAedConfig], Optional[PannsBackgroundConfig], Optional[TopicConfig], Any, Optional[List[str]], Optional[Union[str, Path]], Optional[List[str]], bool) -> Dict[str, Any]
+    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Optional[Union[str, Path]], Optional[DnsmosConfig], Optional[FireRedAedConfig], Optional[PannsBackgroundConfig], Optional[DassNoiseTypeConfig], Optional[TopicConfig], Any, Optional[FireRedLidConfig], Optional[List[str]], Optional[Union[str, Path]], Optional[List[str]], bool) -> Dict[str, Any]
     manifest = Path(manifest_path)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -255,16 +290,16 @@ def run_manifest(
                         brouhaha_config=brouhaha_config,
                         recrir_config=recrir_config,
                         speaker_config=speaker_config,
-                        moss_client=moss_client,
-                        channel_activity_client=channel_activity_client,
                         artifact_dir=artifact_root,
                         artifact_record_index=row_index,
                         tool_context=tool_context,
                         dnsmos_config=dnsmos_config,
                         firered_aed_config=firered_aed_config,
                         panns_config=panns_config,
+                        dass_config=dass_config,
                         topic_config=topic_config,
                         topic_client=topic_client,
+                        firered_lid_config=firered_lid_config,
                         initial_tags=base_tags,
                         selected_tag_paths=row_tag_paths,
                     )
@@ -298,8 +333,6 @@ def tag_record(
     recrir_config=None,
     speaker_config=None,
     recrir_client=None,
-    moss_client=None,
-    channel_activity_client=None,
     artifact_dir=None,
     dnsmos_config=None,
     dnsmos_client=None,
@@ -307,12 +340,15 @@ def tag_record(
     firered_aed_client=None,
     panns_config=None,
     panns_client=None,
+    dass_config=None,
+    dass_client=None,
     topic_config=None,
     topic_client=None,
+    firered_lid_config=None,
     initial_tags=None,
     selected_tag_paths=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerLayerConfig], Any, Any, Any, Any, Optional[Union[str, Path]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[PannsBackgroundConfig], Any, Optional[TopicConfig], Any, Optional[Dict[str, Any]], Optional[List[str]]) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Any, Optional[Union[str, Path]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[PannsBackgroundConfig], Any, Optional[DassNoiseTypeConfig], Any, Optional[TopicConfig], Any, Optional[FireRedLidConfig], Optional[Dict[str, Any]], Optional[List[str]]) -> Dict[str, Any]
     return _tag_record_internal(
         record,
         manifest_dir,
@@ -321,8 +357,6 @@ def tag_record(
         recrir_config=recrir_config,
         speaker_config=speaker_config,
         recrir_client=recrir_client,
-        moss_client=moss_client,
-        channel_activity_client=channel_activity_client,
         artifact_dir=artifact_dir,
         dnsmos_config=dnsmos_config,
         dnsmos_client=dnsmos_client,
@@ -330,8 +364,11 @@ def tag_record(
         firered_aed_client=firered_aed_client,
         panns_config=panns_config,
         panns_client=panns_client,
+        dass_config=dass_config,
+        dass_client=dass_client,
         topic_config=topic_config,
         topic_client=topic_client,
+        firered_lid_config=firered_lid_config,
         initial_tags=initial_tags,
         selected_tag_paths=selected_tag_paths,
     )["tags"]
@@ -345,8 +382,6 @@ def _tag_record_internal(
     recrir_config=None,
     speaker_config=None,
     recrir_client=None,
-    moss_client=None,
-    channel_activity_client=None,
     artifact_dir=None,
     artifact_record_index=None,
     tool_context=None,
@@ -356,12 +391,15 @@ def _tag_record_internal(
     firered_aed_client=None,
     panns_config=None,
     panns_client=None,
+    dass_config=None,
+    dass_client=None,
     topic_config=None,
     topic_client=None,
+    firered_lid_config=None,
     initial_tags=None,
     selected_tag_paths=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerLayerConfig], Any, Any, Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[PannsBackgroundConfig], Any, Optional[TopicConfig], Any, Optional[Dict[str, Any]], Optional[List[str]]) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[PannsBackgroundConfig], Any, Optional[DassNoiseTypeConfig], Any, Optional[TopicConfig], Any, Optional[FireRedLidConfig], Optional[Dict[str, Any]], Optional[List[str]]) -> Dict[str, Any]
     validate_input_record(record)
     sample = record["sample"]
     sample_id = sample["sample_id"]
@@ -430,15 +468,14 @@ def _tag_record_internal(
         if STAGE_SPEAKER in stages:
             _run_speaker_tools(
                 audio_path,
-                sample,
+                record,
+                manifest_dir,
                 tool_context,
                 tags,
                 internal_results,
                 warnings,
                 sample_id,
                 speaker_config=speaker_config,
-                moss_client=moss_client,
-                channel_activity_client=channel_activity_client,
                 artifact_dir=artifact_dir,
                 artifact_record_index=artifact_record_index,
             )
@@ -485,6 +522,17 @@ def _tag_record_internal(
                 panns_config=panns_config,
                 panns_client=panns_client,
             )
+        if STAGE_DASS in stages:
+            _run_dass_noise_type_tool(
+                audio_path,
+                tool_context,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                dass_config=dass_config,
+                dass_client=dass_client,
+            )
         if STAGE_RECRIR in stages:
             _run_recrir_tools(
                 audio_path,
@@ -498,9 +546,25 @@ def _tag_record_internal(
                 artifact_dir=artifact_dir,
                 artifact_record_index=artifact_record_index,
             )
+        if STAGE_FIRERED_LID in stages:
+            _run_firered_lid_tool(
+                audio_path,
+                tool_context,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                firered_lid_config=firered_lid_config,
+            )
 
     warnings.extend(
         compare_native_metadata_basic_acoustic_fields(sample, tags["basic_acoustic"])
+    )
+    warnings.extend(
+        compare_native_metadata_audio_quality_fields(sample, tags["audio_quality"])
+    )
+    warnings.extend(
+        compare_native_metadata_room_acoustic_fields(sample, tags["room_acoustic"])
     )
     warnings.extend(
         compare_native_metadata_sound_field_scene_fields(
@@ -509,6 +573,8 @@ def _tag_record_internal(
         )
     )
     warnings.extend(audit_basic_acoustic(tags["basic_acoustic"]))
+    warnings.extend(audit_audio_quality(tags["audio_quality"]))
+    warnings.extend(audit_room_acoustic(tags["room_acoustic"]))
     warnings.extend(audit_sound_field_scene(tags["sound_field_scene"]))
     warnings.extend(audit_speaker(tags["speaker"]))
     warnings.extend(audit_language_content(tags["language_content"]))
@@ -524,6 +590,8 @@ def empty_tags():
     # type: () -> Dict[str, Any]
     return {
         "basic_acoustic": dict(BASIC_ACOUSTIC_FIELDS),
+        "audio_quality": dict(AUDIO_QUALITY_FIELDS),
+        "room_acoustic": dict(ROOM_ACOUSTIC_FIELDS),
         "sound_field_scene": dict(SOUND_FIELD_SCENE_FIELDS),
         "speaker": dict(SPEAKER_FIELDS),
         "language_content": dict(LANGUAGE_CONTENT_FIELDS),
@@ -614,6 +682,7 @@ def _apply_no_transcript_speech_stage_guard(sample, tags, stages, warnings):
             STAGE_SPEAKER,
             STAGE_DNSMOS,
             STAGE_RECRIR,
+            STAGE_FIRERED_LID,
         ]
     )
     if not skipped:
@@ -666,7 +735,14 @@ def _stages_for_tag_paths(selected_tag_paths, tags=None):
         if value in STAGE_TAG_PATHS:
             stages.add(value)
             continue
-        if value in ("basic_acoustic", "sound_field_scene", "speaker", "language_content"):
+        if value in (
+            "basic_acoustic",
+            "audio_quality",
+            "room_acoustic",
+            "sound_field_scene",
+            "speaker",
+            "language_content",
+        ):
             stages.update(_stages_for_group(value))
             continue
         matched = False
@@ -869,7 +945,7 @@ def _run_language_content_tools(
                     "tool_name": DETERMINISTIC_LANGUAGE_CONTENT_TOOL["tool_name"],
                 }
             )
-            for field in ("language", "word_count", "punctuation", "repetition", "filler"):
+            for field in ("word_count", "punctuation", "repetition", "filler"):
                 tags["language_content"][field] = None
 
     config = topic_config or TopicConfig()
@@ -904,23 +980,50 @@ def _run_language_content_tools(
         tags["language_content"]["topic"] = None
 
 
+def _run_firered_lid_tool(
+    audio_path,
+    tool_context,
+    tags,
+    internal_results,
+    warnings,
+    sample_id,
+    firered_lid_config=None,
+):
+    try:
+        result = FIRERED_LID_LANGUAGE_CONTENT_TOOL["run"](
+            audio_path,
+            context=tool_context,
+            config=firered_lid_config,
+        )
+        apply_result(tags, internal_results, result)
+    except Exception as exc:  # noqa: BLE001 - no non-FireRed LID fallback is allowed.
+        warnings.append(
+            {
+                "type": "firered_lid_error",
+                "message": str(exc),
+                "sample_id": sample_id,
+                "audio_path": str(audio_path),
+                "tool_name": FIRERED_LID_LANGUAGE_CONTENT_TOOL["tool_name"],
+            }
+        )
+        tags["language_content"]["language"] = None
+
+
 def _run_speaker_tools(
     audio_path,
-    sample,
+    record,
+    manifest_dir,
     tool_context,
     tags,
     internal_results,
     warnings,
     sample_id,
     speaker_config=None,
-    moss_client=None,
-    channel_activity_client=None,
     artifact_dir=None,
     artifact_record_index=None,
 ):
-    # type: (Path, Dict[str, Any], Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], str, Optional[SpeakerLayerConfig], Any, Any, Optional[Union[str, Path]], Optional[int]) -> None
+    # type: (Path, Dict[str, Any], Union[str, Path], Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], str, Optional[SpeakerEvidenceConfig], Optional[Union[str, Path]], Optional[int]) -> None
     duration_sec = tags["basic_acoustic"].get("duration_sec")
-    channels = tags["basic_acoustic"].get("channels")
     if duration_sec is None or duration_sec <= 0:
         warnings.append(
             {
@@ -933,513 +1036,66 @@ def _run_speaker_tools(
         _null_speaker_tags(tags)
         return
 
-    config = speaker_config or default_speaker_layer_config(enable_moss=False)
-    target_units = _speaker_target_units_from_native_metadata(sample)
-    recording_id = _speaker_recording_id(sample, sample_id)
-    input_kind = _speaker_input_kind(sample, channels)
-    metrics_config = SpeakerMetricsConfig(
-        min_segment_duration_sec=config.channel_activity_config.min_segment_duration_sec,
-        merge_same_speaker_gap_sec=config.channel_activity_config.merge_gap_sec,
-        min_speech_duration_sec=config.channel_activity_config.min_segment_duration_sec,
+    config = speaker_config or default_speaker_evidence_config()
+    artifact_root = (
+        Path(artifact_dir)
+        if artifact_dir is not None
+        else Path(manifest_dir) / "artifacts"
     )
     try:
-        _run_native_metadata_speaker_route(
-            sample,
-            tags,
-            internal_results,
-            warnings,
-            sample_id,
-            duration_sec,
-            metrics_config,
-            recording_id,
-            input_kind,
-            target_units,
-            artifact_dir,
-            artifact_record_index,
-        )
-        return
-    except Exception as exc:  # noqa: BLE001 - invalid metadata falls back to models.
-        if _has_native_speaker_segment_metadata(sample):
-            warnings.append(
-                {
-                    "type": "native_metadata_speaker_error",
-                    "message": str(exc),
-                    "sample_id": sample_id,
-                    "audio_path": str(audio_path),
-                    "tool_name": NATIVE_METADATA_DIARIZE_TOOL["tool_name"],
-                }
-            )
-
-    separated_channel_input = (
-        channels is not None
-        and channels > 1
-        and input_kind == "separated_headset_channels"
-    )
-    channel_candidate = config.enable_channel_activity and separated_channel_input
-    channel_error = None
-    moss_available = config.enable_moss or moss_client is not None
-
-    if separated_channel_input:
-        channels_are_single_speaker = bool(
-            config.force_channel_activity or config.prefer_channel_activity
-        )
-        if (
-            not channels_are_single_speaker
-            and moss_available
-            and config.run_moss_for_channel_qa
-        ):
-            try:
-                purity_result = MOSS_DIARIZE_TOOL["run_channel_purity_check"](
-                    audio_path,
-                    duration_sec=duration_sec,
-                    context=tool_context,
-                    config=config.moss_config,
-                    client=moss_client,
-                )
-                internal_results.append(purity_result.to_record())
-                channels_are_single_speaker = bool(
-                    purity_result.value.get("all_channels_single_speaker")
-                )
-            except Exception as exc:  # noqa: BLE001 - QA failures select the mixed route.
-                warnings.append(
-                    {
-                        "type": "moss_channel_purity_check_error",
-                        "message": str(exc),
-                        "sample_id": sample_id,
-                        "audio_path": str(audio_path),
-                        "tool_name": MOSS_DIARIZE_TOOL["tool_name"],
-                    }
-                )
-
-        if channels_are_single_speaker and channel_candidate:
-            try:
-                _run_channel_activity_speaker_route(
-                    audio_path,
-                    tool_context,
-                    tags,
-                    internal_results,
-                    warnings,
-                    sample_id,
-                    duration_sec,
-                    config,
-                    metrics_config,
-                    recording_id,
-                    input_kind,
-                    target_units,
-                    channel_activity_client,
-                    artifact_dir,
-                    artifact_record_index,
-                )
-                return
-            except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
-                channel_error = exc
-                warnings.append(
-                    {
-                        "type": "channel_activity_error",
-                        "message": str(exc),
-                        "sample_id": sample_id,
-                        "audio_path": str(audio_path),
-                        "tool_name": CHANNEL_ACTIVITY_TOOL["tool_name"],
-                    }
-                )
-
-        if moss_available:
-            try:
-                _run_moss_merged_headset_speaker_route(
-                    audio_path,
-                    tool_context,
-                    tags,
-                    internal_results,
-                    warnings,
-                    sample_id,
-                    duration_sec,
-                    config,
-                    metrics_config,
-                    recording_id,
-                    input_kind,
-                    target_units,
-                    moss_client,
-                    artifact_dir,
-                    artifact_record_index,
-                )
-                return
-            except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
-                warnings.append(
-                    {
-                        "type": "moss_merged_headset_diarize_error",
-                        "message": str(exc),
-                        "sample_id": sample_id,
-                        "audio_path": str(audio_path),
-                        "tool_name": MOSS_DIARIZE_TOOL["tool_name"],
-                    }
-                )
-
-        if channel_error is None and not moss_available:
-            if channels_are_single_speaker and not config.enable_channel_activity:
-                warning_type = "speaker_channel_activity_disabled"
-                message = "Channel activity is disabled for asserted single-speaker channels"
-            else:
-                warning_type = "speaker_channel_purity_not_configured"
-                message = (
-                    "Separated-headset channel activity requires MOSS channel "
-                    "purity verification or an explicit single-speaker-per-channel assertion"
-                )
-            warnings.append(
-                {
-                    "type": warning_type,
-                    "message": message,
-                    "sample_id": sample_id,
-                    "audio_path": str(audio_path),
-                }
-            )
-        _null_speaker_tags(tags)
-        return
-
-    if not separated_channel_input and moss_available:
-        try:
-            _run_moss_speaker_route(
-                audio_path,
-                tool_context,
-                tags,
-                internal_results,
-                warnings,
+        result = run_speaker_v2_record(
+            record,
+            manifest_dir,
+            manifest_dir,
+            config,
+            context=tool_context,
+            artifact_root=artifact_root,
+            artifact_sample_id=_speaker_artifact_sample_key(
                 sample_id,
-                duration_sec,
-                config,
-                metrics_config,
-                recording_id,
-                input_kind,
-                target_units,
-                moss_client,
-                artifact_dir,
                 artifact_record_index,
+            ),
+        )
+        speaker = result.get("speaker")
+        if not isinstance(speaker, dict):
+            raise ValueError("speaker-v2 result is missing the public speaker object")
+        missing_fields = sorted(set(SPEAKER_FIELDS) - set(speaker))
+        if missing_fields:
+            raise ValueError(
+                "speaker-v2 result is missing fields: %s"
+                % ", ".join(missing_fields)
             )
-            return
-        except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
-            warnings.append(
-                {
-                    "type": "moss_diarize_error",
-                    "message": str(exc),
-                    "sample_id": sample_id,
-                    "audio_path": str(audio_path),
-                    "tool_name": MOSS_DIARIZE_TOOL["tool_name"],
-                }
-            )
-
-    if not moss_available:
+        for field in SPEAKER_FIELDS:
+            tags["speaker"][field] = speaker[field]
+        internal_results.append(
+            ToolResult(
+                tag_path="speaker",
+                value=dict(tags["speaker"]),
+                tool_name="speaker_v2",
+                method="speaker_evidence_v2_direct",
+                status="estimated",
+                confidence=1.0,
+                tool_type="model",
+                tool_version="speaker_v2.direct.1",
+                evidence={
+                    "run_profile": result.get("run_profile"),
+                    "policy_version": result.get("policy_version"),
+                    "policy_hash": result.get("policy_hash"),
+                    "fusion_artifact": result.get("fusion_artifact"),
+                    "artifacts": result.get("artifacts"),
+                },
+            ).to_record()
+        )
+    except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
         warnings.append(
             {
-                "type": "speaker_diarization_not_configured",
-                "message": "MOSS diarize is disabled and channel route did not apply",
+                "type": "speaker_v2_error",
+                "message": str(exc),
                 "sample_id": sample_id,
                 "audio_path": str(audio_path),
+                "tool_name": "speaker_v2",
             }
         )
-    _null_speaker_tags(tags)
-
-
-def _run_native_metadata_speaker_route(
-    sample,
-    tags,
-    internal_results,
-    warnings,
-    sample_id,
-    duration_sec,
-    metrics_config,
-    recording_id,
-    input_kind,
-    target_units,
-    artifact_dir,
-    artifact_record_index,
-):
-    native_result = NATIVE_METADATA_DIARIZE_TOOL["run"](
-        sample,
-        duration_sec=duration_sec,
-        config=metrics_config,
-    )
-    internal_results.append(native_result.to_record())
-    source_key = native_result.value.get("source_key")
-    if source_key == "utterances" and not _has_explicit_target_units(sample):
-        target_units = []
-    metadata = build_metadata_from_timeline(
-        native_result.value.get("segments", []),
-        duration_sec,
-        sample_id,
-        recording_id=recording_id,
-        input_kind=input_kind,
-        primary_route="native_metadata_segments",
-        target_units=target_units,
-        config=metrics_config,
-    )
-    _write_speaker_metadata_artifact(
-        metadata,
-        internal_results,
-        warnings,
-        artifact_dir,
-        sample_id,
-        artifact_record_index,
-    )
-    for result in SPEAKER_METRICS_TOOL["run"](metadata):
-        apply_result(tags, internal_results, result)
-
-
-def _run_channel_activity_speaker_route(
-    audio_path,
-    tool_context,
-    tags,
-    internal_results,
-    warnings,
-    sample_id,
-    duration_sec,
-    config,
-    metrics_config,
-    recording_id,
-    input_kind,
-    target_units,
-    channel_activity_client,
-    artifact_dir,
-    artifact_record_index,
-):
-    channel_result = CHANNEL_ACTIVITY_TOOL["run"](
-        audio_path,
-        duration_sec=duration_sec,
-        context=tool_context,
-        config=config.channel_activity_config,
-        client=channel_activity_client,
-    )
-    internal_results.append(channel_result.to_record())
-    metadata = build_metadata_from_channel_activity(
-        channel_result.value,
-        duration_sec,
-        sample_id,
-        recording_id=recording_id,
-        input_kind=input_kind,
-        target_units=target_units,
-        config=metrics_config,
-    )
-    _write_speaker_metadata_artifact(
-        metadata,
-        internal_results,
-        warnings,
-        artifact_dir,
-        sample_id,
-        artifact_record_index,
-    )
-    for result in SPEAKER_METRICS_TOOL["run"](metadata):
-        apply_result(tags, internal_results, result)
-
-
-def _run_moss_merged_headset_speaker_route(
-    audio_path,
-    tool_context,
-    tags,
-    internal_results,
-    warnings,
-    sample_id,
-    duration_sec,
-    config,
-    metrics_config,
-    recording_id,
-    input_kind,
-    target_units,
-    moss_client,
-    artifact_dir,
-    artifact_record_index,
-):
-    moss_result = MOSS_DIARIZE_TOOL["run_merged_channels"](
-        audio_path,
-        duration_sec=duration_sec,
-        context=tool_context,
-        config=config.moss_config,
-        client=moss_client,
-    )
-    internal_results.append(moss_result.to_record())
-    metadata = build_metadata_from_timeline(
-        moss_result.value.get("segments", []),
-        duration_sec,
-        sample_id,
-        recording_id=recording_id,
-        input_kind=input_kind,
-        primary_route="moss_diarize_merged_headset",
-        target_units=target_units,
-        config=metrics_config,
-    )
-    _write_speaker_metadata_artifact(
-        metadata,
-        internal_results,
-        warnings,
-        artifact_dir,
-        sample_id,
-        artifact_record_index,
-    )
-    for result in SPEAKER_METRICS_TOOL["run"](metadata):
-        apply_result(tags, internal_results, result)
-
-
-def _run_moss_speaker_route(
-    audio_path,
-    tool_context,
-    tags,
-    internal_results,
-    warnings,
-    sample_id,
-    duration_sec,
-    config,
-    metrics_config,
-    recording_id,
-    input_kind,
-    target_units,
-    moss_client,
-    artifact_dir,
-    artifact_record_index,
-):
-    moss_result = MOSS_DIARIZE_TOOL["run"](
-        audio_path,
-        duration_sec=duration_sec,
-        context=tool_context,
-        config=config.moss_config,
-        client=moss_client,
-    )
-    internal_results.append(moss_result.to_record())
-    metadata = build_metadata_from_timeline(
-        moss_result.value.get("segments", []),
-        duration_sec,
-        sample_id,
-        recording_id=recording_id,
-        input_kind=input_kind,
-        primary_route="moss_diarize",
-        target_units=target_units,
-        config=metrics_config,
-    )
-    _write_speaker_metadata_artifact(
-        metadata,
-        internal_results,
-        warnings,
-        artifact_dir,
-        sample_id,
-        artifact_record_index,
-    )
-    for result in SPEAKER_METRICS_TOOL["run"](metadata):
-        apply_result(tags, internal_results, result)
-
-
-def _write_speaker_metadata_artifact(
-    metadata,
-    internal_results,
-    warnings,
-    artifact_dir,
-    sample_id,
-    artifact_record_index,
-):
-    evidence = {
-        "metadata_version": metadata.get("metadata_version"),
-        "primary_route": metadata.get("primary_route"),
-        "input_kind": metadata.get("input_kind"),
-    }
-    if artifact_dir is not None:
-        try:
-            artifact_path = write_speaker_artifact(
-                metadata,
-                Path(artifact_dir) / "speaker",
-                _artifact_sample_key(sample_id, artifact_record_index),
-                route=metadata.get("primary_route"),
-            )
-            evidence["artifact_path"] = str(artifact_path)
-            evidence["artifact_format"] = "json.gz"
-        except Exception as exc:  # noqa: BLE001 - artifact failure is internal.
-            warnings.append(
-                {
-                    "type": "speaker_artifact_write_error",
-                    "message": str(exc),
-                    "sample_id": sample_id,
-                }
-            )
-    internal_results.append(
-        ToolResult(
-            tag_path="speaker.metadata",
-            value=metadata,
-            tool_name="speaker_metadata_builder",
-            method="speaker_metadata_v0.1",
-            status="estimated",
-            confidence=1.0,
-            tool_type="derived",
-            evidence=evidence,
-        ).to_record()
-    )
-
-
-def _speaker_target_units_from_native_metadata(sample):
-    native_metadata = sample.get("native_metadata", {})
-    for key in ("target_units", "utterances"):
-        value = native_metadata.get(key)
-        if isinstance(value, list):
-            return value
-    start = _metadata_float(native_metadata.get("start_sec", native_metadata.get("start")))
-    end = _metadata_float(native_metadata.get("end_sec", native_metadata.get("end")))
-    if start is not None and end is not None and end > start:
-        unit_id = (
-            sample.get("sample_id")
-            or native_metadata.get("utt_id")
-            or native_metadata.get("utterance_id")
-        )
-        return [
-            {
-                "unit_id": str(unit_id),
-                "start_sec": 0.0,
-                "end_sec": round(end - start, 6),
-            }
-        ]
-    return []
-
-
-def _has_explicit_target_units(sample):
-    native_metadata = sample.get("native_metadata", {})
-    return isinstance(native_metadata.get("target_units"), list)
-
-
-def _has_native_speaker_segment_metadata(sample):
-    native_metadata = sample.get("native_metadata", {})
-    if not isinstance(native_metadata, dict):
-        return False
-    for key in ("speaker_segments", "diarization_segments", "segments", "utterances"):
-        value = native_metadata.get(key)
-        if isinstance(value, list) and value:
-            return True
-    return False
-
-
-def _metadata_float(value):
-    try:
-        result = float(value)
-    except (TypeError, ValueError):
-        return None
-    if result != result or result in (float("inf"), float("-inf")):
-        return None
-    return result
-
-
-def _speaker_recording_id(sample, sample_id):
-    native_metadata = sample.get("native_metadata", {})
-    for key in ("recording_id", "meeting_id", "audio_id"):
-        value = native_metadata.get(key)
-        if value:
-            return str(value)
-    return sample_id
-
-
-def _speaker_input_kind(sample, channels):
-    native_metadata = sample.get("native_metadata", {})
-    microphone_type = str(native_metadata.get("microphone_type", "")).lower()
-    raw_path = str(sample.get("audio", {}).get("path", "")).lower()
-    if "mix-headset" in microphone_type or "mix-headset" in raw_path:
-        return "mix_headset"
-    if "headset" in microphone_type or "headset" in raw_path:
-        if channels is not None and channels > 1:
-            return "separated_headset_channels"
-        return "separated_headset_files"
-    if channels is not None and channels > 1:
-        return "separated_headset_channels"
-    return "unknown_audio_layout"
+        _null_speaker_tags(tags)
 
 
 def _null_speaker_tags(tags):
@@ -1448,8 +1104,11 @@ def _null_speaker_tags(tags):
 
 
 def _set_no_transcript_speaker_tags(tags):
+    tags["speaker"]["speaker_count"] = 0
     tags["speaker"]["multi_speaker"] = False
+    tags["speaker"]["speaker_change_count"] = 0
     tags["speaker"]["speaker_change"] = False
+    tags["speaker"]["overlap_ratio"] = 0.0
     tags["speaker"]["speaker_overlap"] = False
 
 
@@ -1464,8 +1123,8 @@ def _null_silence_tags(tags):
 
 
 def _null_recrir_tags(tags):
-    tags["sound_field_scene"]["rt60"] = None
-    tags["sound_field_scene"]["c50"] = None
+    tags["room_acoustic"]["rt60_sec"] = None
+    tags["room_acoustic"]["c50_db"] = None
 
 
 def _run_brouhaha_tool(
@@ -1483,8 +1142,14 @@ def _run_brouhaha_tool(
             context=tool_context,
             config=brouhaha_config,
         )
+        public_paths = set(STAGE_TAG_PATHS[STAGE_BROUHAHA])
         for result in results:
-            apply_result(tags, internal_results, result)
+            if result.tag_path in public_paths:
+                apply_result(tags, internal_results, result)
+            else:
+                # Brouhaha C50 (internal.brouhaha_c50_db) stays internal
+                # evidence for cross-validation against room_acoustic.c50_db.
+                internal_results.append(result.to_record())
             if result.status != "estimated":
                 warnings.append(
                     {
@@ -1506,8 +1171,7 @@ def _run_brouhaha_tool(
                 "tool_name": BROUHAHA_ACOUSTIC_TOOL["tool_name"],
             }
         )
-        tags["basic_acoustic"]["snr_db"] = None
-        tags["basic_acoustic"]["c50"] = None
+        tags["audio_quality"]["snr_db"] = None
 
 
 def _run_dnsmos_tool(
@@ -1631,6 +1295,39 @@ def _run_panns_background_tool(
         _null_panns_background_tag(tags)
 
 
+def _run_dass_noise_type_tool(
+    audio_path,
+    tool_context,
+    tags,
+    internal_results,
+    warnings,
+    sample_id,
+    dass_config=None,
+    dass_client=None,
+):
+    try:
+        results = DASS_NOISE_TYPE_TOOL["run"](
+            audio_path,
+            context=tool_context,
+            config=dass_config,
+            client=dass_client,
+            music_present=tags["sound_field_scene"]["music_present"],
+        )
+        for result in results:
+            apply_result(tags, internal_results, result)
+    except Exception as exc:  # noqa: BLE001 - no non-DASS fallback is allowed.
+        warnings.append(
+            {
+                "type": "dass_noise_type_error",
+                "message": str(exc),
+                "sample_id": sample_id,
+                "audio_path": str(audio_path),
+                "tool_name": DASS_NOISE_TYPE_TOOL["tool_name"],
+            }
+        )
+        _null_dass_tags(tags)
+
+
 def _run_recrir_tools(
     audio_path,
     tool_context,
@@ -1698,7 +1395,7 @@ def _run_recrir_tools(
                 }
             )
 
-    for tool, field in ((RT60_TOOL, "rt60"), (C50_TOOL, "c50")):
+    for tool, field in ((RT60_TOOL, "rt60_sec"), (C50_TOOL, "c50_db")):
         try:
             result = tool["run"](
                 rir_payload,
@@ -1716,26 +1413,31 @@ def _run_recrir_tools(
                     "field": tool["tag_path"],
                 }
             )
-            tags["sound_field_scene"][field] = None
+            tags["room_acoustic"][field] = None
 
 
 def _null_rir_related_tags(tags):
-    tags["sound_field_scene"]["rt60"] = None
-    tags["sound_field_scene"]["c50"] = None
+    tags["room_acoustic"]["rt60_sec"] = None
+    tags["room_acoustic"]["c50_db"] = None
 
 
 def _null_dnsmos_tags(tags):
     for field in ("dnsmos_sig", "dnsmos_bak", "dnsmos_ovrl", "dnsmos_p808"):
-        tags["basic_acoustic"][field] = None
+        tags["audio_quality"][field] = None
 
 
 def _null_firered_aed_tags(tags):
-    tags["sound_field_scene"]["audio_events"] = None
-    tags["sound_field_scene"]["music"] = None
+    tags["sound_field_scene"]["speech_music_events"] = None
+    tags["sound_field_scene"]["music_present"] = None
 
 
 def _null_panns_background_tag(tags):
     tags["sound_field_scene"]["sound"] = None
+
+
+def _null_dass_tags(tags):
+    tags["sound_field_scene"]["external_noise_type"] = None
+    tags["sound_field_scene"]["noise_composition"] = None
 
 
 def write_rir_artifact(rir_payload, artifact_dir, sample_key):
@@ -1763,6 +1465,12 @@ def _artifact_sample_key(sample_id, record_index):
     return "%06d_%s" % (record_index, sample_id)
 
 
+def _speaker_artifact_sample_key(sample_id, record_index):
+    # type: (str, Optional[int]) -> str
+    row_number = 1 if record_index is None else record_index
+    return "%s-sample-%d" % (sample_id, row_number)
+
+
 def _safe_artifact_stem(value):
     # type: (str) -> str
     raw = str(value)
@@ -1785,12 +1493,6 @@ def compare_native_metadata_basic_acoustic_fields(sample, observed_basic_acousti
         ("channels", 0),
         ("silence_ratio", 1e-6),
         ("silence_segments", None),
-        ("snr_db", 1e-6),
-        ("c50", 1e-6),
-        ("dnsmos_sig", 1e-6),
-        ("dnsmos_bak", 1e-6),
-        ("dnsmos_ovrl", 1e-6),
-        ("dnsmos_p808", 1e-6),
     ]
     for field, tolerance in comparisons:
         native_value = native_metadata.get(field)
@@ -1818,21 +1520,95 @@ def compare_native_metadata_basic_acoustic_fields(sample, observed_basic_acousti
     return warnings
 
 
-def compare_native_metadata_sound_field_scene_fields(sample, observed_sound_field):
+def compare_native_metadata_audio_quality_fields(sample, observed_audio_quality):
     # type: (Dict[str, Any], Dict[str, Any]) -> List[Dict[str, Any]]
     native_metadata = sample.get("native_metadata", {})
     warnings = []  # type: List[Dict[str, Any]]
     comparisons = [
-        ("far_field", None),
-        ("rt60", 1e-6),
-        ("c50", 1e-6),
-        ("audio_events", None),
-        ("music", None),
-        ("sound", None),
+        ("snr_db", 1e-6),
+        ("dnsmos_sig", 1e-6),
+        ("dnsmos_bak", 1e-6),
+        ("dnsmos_ovrl", 1e-6),
+        ("dnsmos_p808", 1e-6),
     ]
     for field, tolerance in comparisons:
         native_value = native_metadata.get(field)
-        observed_value = observed_sound_field.get(field)
+        observed_value = observed_audio_quality.get(field)
+        if native_value is None or observed_value is None:
+            continue
+        if (
+            tolerance is not None
+            and isinstance(native_value, (int, float))
+            and isinstance(observed_value, (int, float))
+        ):
+            mismatch = abs(float(native_value) - float(observed_value)) > tolerance
+        else:
+            mismatch = native_value != observed_value
+        if mismatch:
+            warnings.append(
+                {
+                    "type": "native_metadata_audio_quality_mismatch",
+                    "field": field,
+                    "native_metadata_value": native_value,
+                    "observed_value": observed_value,
+                    "message": "observed audio quality value differs from native metadata",
+                }
+            )
+    return warnings
+
+
+def compare_native_metadata_room_acoustic_fields(sample, observed_room_acoustic):
+    # type: (Dict[str, Any], Dict[str, Any]) -> List[Dict[str, Any]]
+    native_metadata = sample.get("native_metadata", {})
+    warnings = []  # type: List[Dict[str, Any]]
+    # Native metadata keys stay in dataset terms; observed keys use the new
+    # naming (rt60_sec / c50_db).
+    comparisons = [
+        ("far_field", "far_field", None),
+        ("rt60", "rt60_sec", 1e-6),
+        ("c50", "c50_db", 1e-6),
+    ]
+    for native_key, observed_key, tolerance in comparisons:
+        native_value = native_metadata.get(native_key)
+        observed_value = observed_room_acoustic.get(observed_key)
+        if native_value is None or observed_value is None:
+            continue
+        if (
+            tolerance is not None
+            and isinstance(native_value, (int, float))
+            and isinstance(observed_value, (int, float))
+        ):
+            mismatch = abs(float(native_value) - float(observed_value)) > tolerance
+        else:
+            mismatch = native_value != observed_value
+        if mismatch:
+            warnings.append(
+                {
+                    "type": "native_metadata_room_acoustic_mismatch",
+                    "field": observed_key,
+                    "native_metadata_value": native_value,
+                    "observed_value": observed_value,
+                    "message": "observed room acoustic value differs from native metadata",
+                }
+            )
+    return warnings
+
+
+def compare_native_metadata_sound_field_scene_fields(sample, observed_sound_field):
+    # type: (Dict[str, Any], Dict[str, Any]) -> List[Dict[str, Any]]
+    native_metadata = sample.get("native_metadata", {})
+    warnings = []  # type: List[Dict[str, Any]]
+    # Native metadata keys stay in dataset terms (audio_events / music);
+    # observed keys use the new naming (speech_music_events / music_present).
+    comparisons = [
+        ("audio_events", "speech_music_events", None),
+        ("music", "music_present", None),
+        ("sound", "sound", None),
+        ("external_noise_type", "external_noise_type", None),
+    ]
+    for native_key, observed_key, tolerance in comparisons:
+        native_value = native_metadata.get(native_key)
+        observed_value = observed_sound_field.get(observed_key)
         if native_value is None or observed_value is None:
             continue
         if (
@@ -1847,7 +1623,7 @@ def compare_native_metadata_sound_field_scene_fields(sample, observed_sound_fiel
             warnings.append(
                 {
                     "type": "native_metadata_sound_field_scene_mismatch",
-                    "field": field,
+                    "field": observed_key,
                     "native_metadata_value": native_value,
                     "observed_value": observed_value,
                     "message": "observed sound-field value differs from native metadata",
@@ -1864,8 +1640,6 @@ def audit_basic_acoustic(basic_acoustic):
     channels = basic_acoustic.get("channels")
     silence_ratio = basic_acoustic.get("silence_ratio")
     silence_segments = basic_acoustic.get("silence_segments")
-    snr_db = basic_acoustic.get("snr_db")
-    c50 = basic_acoustic.get("c50")
 
     if duration_sec is not None and (
         isinstance(duration_sec, bool)
@@ -1923,24 +1697,24 @@ def audit_basic_acoustic(basic_acoustic):
                 }
             )
 
+    return warnings
+
+
+def audit_audio_quality(audio_quality):
+    # type: (Dict[str, Any]) -> List[Dict[str, Any]]
+    warnings = []  # type: List[Dict[str, Any]]
+
+    snr_db = audio_quality.get("snr_db")
     if snr_db is not None and (
         isinstance(snr_db, bool)
         or not isinstance(snr_db, (int, float))
         or not _is_finite_number(snr_db)
     ):
-        basic_acoustic["snr_db"] = None
-        warnings.append({"type": "invalid_basic_acoustic_value", "field": "snr_db"})
-
-    if c50 is not None and (
-        isinstance(c50, bool)
-        or not isinstance(c50, (int, float))
-        or not _is_finite_number(c50)
-    ):
-        basic_acoustic["c50"] = None
-        warnings.append({"type": "invalid_basic_acoustic_value", "field": "c50"})
+        audio_quality["snr_db"] = None
+        warnings.append({"type": "invalid_audio_quality_value", "field": "snr_db"})
 
     for field in ("dnsmos_sig", "dnsmos_bak", "dnsmos_ovrl", "dnsmos_p808"):
-        value = basic_acoustic.get(field)
+        value = audio_quality.get(field)
         if value is not None and (
             isinstance(value, bool)
             or not isinstance(value, (int, float))
@@ -1948,10 +1722,47 @@ def audit_basic_acoustic(basic_acoustic):
             or value < 1.0
             or value > 5.0
         ):
-            basic_acoustic[field] = None
+            audio_quality[field] = None
             warnings.append(
-                {"type": "invalid_basic_acoustic_value", "field": field}
+                {"type": "invalid_audio_quality_value", "field": field}
             )
+
+    return warnings
+
+
+def audit_room_acoustic(room_acoustic):
+    # type: (Dict[str, Any]) -> List[Dict[str, Any]]
+    warnings = []  # type: List[Dict[str, Any]]
+
+    far_field = room_acoustic.get("far_field")
+    if far_field is not None and not isinstance(far_field, bool):
+        room_acoustic["far_field"] = None
+        warnings.append(
+            {"type": "invalid_room_acoustic_value", "field": "far_field"}
+        )
+
+    rt60_sec = room_acoustic.get("rt60_sec")
+    if rt60_sec is not None and (
+        isinstance(rt60_sec, bool)
+        or not isinstance(rt60_sec, (int, float))
+        or not _is_finite_number(rt60_sec)
+        or rt60_sec < 0
+    ):
+        room_acoustic["rt60_sec"] = None
+        warnings.append(
+            {"type": "invalid_room_acoustic_value", "field": "rt60_sec"}
+        )
+
+    c50_db = room_acoustic.get("c50_db")
+    if c50_db is not None and (
+        isinstance(c50_db, bool)
+        or not isinstance(c50_db, (int, float))
+        or not _is_finite_number(c50_db)
+    ):
+        room_acoustic["c50_db"] = None
+        warnings.append(
+            {"type": "invalid_room_acoustic_value", "field": "c50_db"}
+        )
 
     return warnings
 
@@ -1960,23 +1771,25 @@ def audit_sound_field_scene(sound_field_scene):
     # type: (Dict[str, Any]) -> List[Dict[str, Any]]
     warnings = []  # type: List[Dict[str, Any]]
 
-    for field in ("far_field", "music"):
-        value = sound_field_scene.get(field)
-        if value is not None and not isinstance(value, bool):
-            sound_field_scene[field] = None
-            warnings.append(
-                {"type": "invalid_sound_field_scene_value", "field": field}
-            )
+    music_present = sound_field_scene.get("music_present")
+    if music_present is not None and not isinstance(music_present, bool):
+        sound_field_scene["music_present"] = None
+        warnings.append(
+            {"type": "invalid_sound_field_scene_value", "field": "music_present"}
+        )
 
-    audio_events = sound_field_scene.get("audio_events")
-    if audio_events is not None and not _is_valid_label_list(
-        audio_events,
+    speech_music_events = sound_field_scene.get("speech_music_events")
+    if speech_music_events is not None and not _is_valid_label_list(
+        speech_music_events,
         allowed=EVENT_NAMES,
         require_allowed_order=True,
     ):
-        sound_field_scene["audio_events"] = None
+        sound_field_scene["speech_music_events"] = None
         warnings.append(
-            {"type": "invalid_sound_field_scene_value", "field": "audio_events"}
+            {
+                "type": "invalid_sound_field_scene_value",
+                "field": "speech_music_events",
+            }
         )
 
     sound = sound_field_scene.get("sound")
@@ -1989,42 +1802,68 @@ def audit_sound_field_scene(sound_field_scene):
             {"type": "invalid_sound_field_scene_value", "field": "sound"}
         )
 
-    music = sound_field_scene.get("music")
-    audio_events = sound_field_scene.get("audio_events")
-    if (
-        music is not None
-        and audio_events is not None
-        and music != ("music" in audio_events)
+    external_noise_type = sound_field_scene.get("external_noise_type")
+    if external_noise_type is not None and not _is_valid_label_list(
+        external_noise_type,
+        allowed=PUBLIC_COMPOSITION_CATEGORIES,
+        max_items=len(PUBLIC_COMPOSITION_CATEGORIES),
     ):
-        sound_field_scene["audio_events"] = None
-        sound_field_scene["music"] = None
+        sound_field_scene["external_noise_type"] = None
         warnings.append(
             {
-                "type": "inconsistent_sound_field_scene_values",
-                "fields": ["audio_events", "music"],
+                "type": "invalid_sound_field_scene_value",
+                "field": "external_noise_type",
             }
         )
 
-    rt60 = sound_field_scene.get("rt60")
-    if rt60 is not None and (
-        isinstance(rt60, bool)
-        or not isinstance(rt60, (int, float))
-        or not _is_finite_number(rt60)
-        or rt60 < 0
+    noise_composition = sound_field_scene.get("noise_composition")
+    if noise_composition is not None and not _is_valid_noise_composition(
+        noise_composition
     ):
-        sound_field_scene["rt60"] = None
-        warnings.append({"type": "invalid_sound_field_scene_value", "field": "rt60"})
+        sound_field_scene["noise_composition"] = None
+        warnings.append(
+            {
+                "type": "invalid_sound_field_scene_value",
+                "field": "noise_composition",
+            }
+        )
 
-    c50 = sound_field_scene.get("c50")
-    if c50 is not None and (
-        isinstance(c50, bool)
-        or not isinstance(c50, (int, float))
-        or not _is_finite_number(c50)
+    music_present = sound_field_scene.get("music_present")
+    speech_music_events = sound_field_scene.get("speech_music_events")
+    if (
+        music_present is not None
+        and speech_music_events is not None
+        and music_present != ("music" in speech_music_events)
     ):
-        sound_field_scene["c50"] = None
-        warnings.append({"type": "invalid_sound_field_scene_value", "field": "c50"})
+        sound_field_scene["speech_music_events"] = None
+        sound_field_scene["music_present"] = None
+        warnings.append(
+            {
+                "type": "inconsistent_sound_field_scene_values",
+                "fields": ["speech_music_events", "music_present"],
+            }
+        )
 
     return warnings
+
+
+def _is_valid_noise_composition(value):
+    if not isinstance(value, dict):
+        return False
+    if set(value.keys()) != set(PUBLIC_COMPOSITION_CATEGORIES):
+        return False
+    for category in PUBLIC_COMPOSITION_CATEGORIES:
+        labels = value[category]
+        if not _is_valid_label_list(
+            labels,
+            max_items=NOISE_COMPOSITION_AUDIT_MAX_ITEMS,
+        ):
+            return False
+        if any(
+            classify_dass_label(label) != category for label in labels
+        ):
+            return False
+    return True
 
 
 def _is_valid_label_list(
@@ -2057,11 +1896,29 @@ def audit_speaker(speaker):
     # type: (Dict[str, Any]) -> List[Dict[str, Any]]
     warnings = []  # type: List[Dict[str, Any]]
 
-    for field in SPEAKER_FIELDS:
+    for field in ("multi_speaker", "speaker_change", "speaker_overlap"):
         value = speaker.get(field)
         if value is not None and not isinstance(value, bool):
             speaker[field] = None
             warnings.append({"type": "invalid_speaker_value", "field": field})
+
+    for field in ("speaker_count", "speaker_change_count"):
+        value = speaker.get(field)
+        if value is not None and not _is_non_negative_int(value):
+            speaker[field] = None
+            warnings.append({"type": "invalid_speaker_value", "field": field})
+
+    overlap_ratio = speaker.get("overlap_ratio")
+    if overlap_ratio is not None and (
+        isinstance(overlap_ratio, bool)
+        or not isinstance(overlap_ratio, (int, float))
+        or not _is_finite_number(overlap_ratio)
+        or not 0 <= overlap_ratio <= 1
+    ):
+        speaker["overlap_ratio"] = None
+        warnings.append(
+            {"type": "invalid_speaker_value", "field": "overlap_ratio"}
+        )
 
     return warnings
 
@@ -2264,6 +2121,67 @@ def build_arg_parser():
         help="Python executable for PANNs subprocess. Defaults to local_config.py.",
     )
     parser.add_argument(
+        "--dass-use-gpu",
+        action="store_true",
+        help="Use GPU for DASS noise-type inference. Defaults to CPU.",
+    )
+    parser.add_argument(
+        "--dass-threshold",
+        type=float,
+        default=0.25,
+        help=(
+            "DASS noise-type probability threshold. Defaults to 0.25 "
+            "(calibrated on phase2: DASS-medium scores are soft, clean "
+            "speech stays below 0.15). Categories present in the full "
+            "527-class vector at or above this threshold populate "
+            "sound_field_scene.external_noise_type."
+        ),
+    )
+    parser.add_argument(
+        "--no-exclusion",
+        action="store_true",
+        help=(
+            "Disable DASS class exclusion entirely. By default primary speech, "
+            "silence, acoustic-scene, reverberation, and echo labels are "
+            "excluded from the ranked top events evidence; with this flag "
+            "every AudioSet class stays eligible so the raw class "
+            "distribution remains visible."
+        ),
+    )
+    parser.add_argument(
+        "--dass-composition-threshold",
+        type=float,
+        default=0.3,
+        help=(
+            "DASS noise-composition per-category probability threshold. "
+            "Defaults to 0.3."
+        ),
+    )
+    parser.add_argument(
+        "--dass-composition-top-k",
+        type=int,
+        default=3,
+        help=(
+            "Maximum DASS noise-composition labels kept per category. "
+            "Defaults to 3."
+        ),
+    )
+    parser.add_argument(
+        "--dass-python",
+        default=None,
+        help="Python executable for DASS subprocess. Defaults to local_config.py.",
+    )
+    parser.add_argument(
+        "--firered-lid-python",
+        default=None,
+        help="Python executable for FireRed LID subprocess. Defaults to local_config.py.",
+    )
+    parser.add_argument(
+        "--firered-lid-use-gpu",
+        action="store_true",
+        help="Use GPU in FireRed LID config. Defaults to CPU.",
+    )
+    parser.add_argument(
         "--brouhaha-python",
         default=None,
         help="Python executable for Brouhaha subprocess. Defaults to local_config.py.",
@@ -2284,86 +2202,15 @@ def build_arg_parser():
         help="Use the personalized DNSMOS primary model. Defaults to regular DNSMOS.",
     )
     parser.add_argument(
-        "--moss-diarize-enable",
+        "--speaker-profile",
+        choices=available_speaker_profiles(),
+        default="quality-shadow",
+        help="Speaker-v2 model and claim-routing profile. Defaults to quality-shadow.",
+    )
+    parser.add_argument(
+        "--speaker-v2-skip-model-verification",
         action="store_true",
-        help="Enable MOSS-Transcribe-Diarize speaker diarization.",
-    )
-    parser.add_argument(
-        "--moss-diarize-python",
-        default=None,
-        help=(
-            "Python executable for local MOSS-Transcribe-Diarize subprocess. "
-            "Defaults to local_config.py."
-        ),
-    )
-    parser.add_argument(
-        "--moss-diarize-endpoint",
-        default=None,
-        help=(
-            "Legacy OpenAI-compatible MOSS /v1/audio/transcriptions endpoint. "
-            "Ignored when a MOSS subprocess Python is configured."
-        ),
-    )
-    parser.add_argument(
-        "--moss-diarize-model",
-        default=None,
-        help="MOSS diarize model name. Defaults to local_config.py.",
-    )
-    parser.add_argument(
-        "--moss-diarize-timeout-sec",
-        type=int,
-        default=None,
-        help="MOSS diarize legacy HTTP timeout in seconds. Defaults to local_config.py.",
-    )
-    parser.add_argument(
-        "--moss-diarize-max-new-tokens",
-        type=int,
-        default=None,
-        help="MOSS diarize max_new_tokens. Defaults to local_config.py.",
-    )
-    parser.add_argument(
-        "--moss-diarize-api-key",
-        default=None,
-        help="Optional bearer token for the legacy MOSS endpoint.",
-    )
-    parser.add_argument(
-        "--moss-diarize-device",
-        default=None,
-        help="Local MOSS device, for example auto, cuda, cuda:0, or cpu.",
-    )
-    parser.add_argument(
-        "--moss-diarize-torch-dtype",
-        default=None,
-        help="Local MOSS torch dtype, for example auto, bfloat16, float16, or float32.",
-    )
-    parser.add_argument(
-        "--moss-diarize-prompt",
-        default=None,
-        help="Optional local MOSS transcription prompt or hotword hint.",
-    )
-    parser.add_argument(
-        "--speaker-channel-activity-disable",
-        action="store_true",
-        help="Disable multi-channel WAV channel-activity speaker route.",
-    )
-    parser.add_argument(
-        "--speaker-prefer-moss",
-        action="store_true",
-        help=(
-            "Skip per-channel MOSS purity QA and use merged-headset MOSS directly. "
-            "Kept for compatibility."
-        ),
-    )
-    parser.add_argument(
-        "--speaker-force-channel-activity",
-        "--speaker-single-speaker-per-channel",
-        "--speaker-prefer-channel-activity",
-        dest="speaker_force_channel_activity",
-        action="store_true",
-        help=(
-            "Assert that dataset documentation guarantees one speaker per channel "
-            "and run per-channel energy VAD without MOSS purity QA."
-        ),
+        help="Skip pinned speaker-v2 model asset hash verification.",
     )
     parser.add_argument(
         "--topic-enable",
@@ -2471,6 +2318,18 @@ def main(argv=None):
         threshold=args.panns_threshold,
         subprocess_python=args.panns_python,
     )
+    dass_config = DassNoiseTypeConfig(
+        use_gpu=args.dass_use_gpu,
+        threshold=args.dass_threshold,
+        exclude_classes=not args.no_exclusion,
+        composition_threshold=args.dass_composition_threshold,
+        composition_top_k=args.dass_composition_top_k,
+        subprocess_python=args.dass_python,
+    )
+    firered_lid_config = FireRedLidConfig(
+        use_gpu=args.firered_lid_use_gpu,
+        subprocess_python=args.firered_lid_python,
+    )
     brouhaha_config = BrouhahaConfig(
         use_gpu=args.brouhaha_use_gpu,
         subprocess_python=args.brouhaha_python,
@@ -2483,24 +2342,12 @@ def main(argv=None):
         personalized=args.dnsmos_personalized,
         subprocess_python=args.dnsmos_python,
     )
-    speaker_config = default_speaker_layer_config(
-        enable_moss=args.moss_diarize_enable,
-        moss_endpoint=args.moss_diarize_endpoint,
-        moss_model=args.moss_diarize_model,
-        moss_timeout_sec=args.moss_diarize_timeout_sec,
-        moss_max_new_tokens=args.moss_diarize_max_new_tokens,
-        moss_api_key=args.moss_diarize_api_key,
-        moss_python=args.moss_diarize_python,
-        moss_device=args.moss_diarize_device,
-        moss_torch_dtype=args.moss_diarize_torch_dtype,
-        moss_prompt=args.moss_diarize_prompt,
+    speaker_config = default_speaker_evidence_config(
+        profile_id=args.speaker_profile,
+        vad_config=firered_vad_config,
+        brouhaha_config=brouhaha_config,
+        verify_model_assets=not args.speaker_v2_skip_model_verification,
     )
-    speaker_config.enable_channel_activity = not args.speaker_channel_activity_disable
-    if args.speaker_prefer_moss:
-        speaker_config.run_moss_for_channel_qa = False
-    if args.speaker_force_channel_activity:
-        speaker_config.force_channel_activity = True
-        speaker_config.prefer_channel_activity = True
     topic_config = TopicConfig(
         enabled=True if args.topic_enable else None,
         provider=args.topic_provider,
@@ -2529,7 +2376,9 @@ def main(argv=None):
         dnsmos_config=dnsmos_config,
         firered_aed_config=firered_aed_config,
         panns_config=panns_config,
+        dass_config=dass_config,
         topic_config=topic_config,
+        firered_lid_config=firered_lid_config,
         sample_ids=args.sample_id,
         existing_tags_path=args.input_tags,
         selected_tag_paths=[args.only_tags] if args.only_tags else None,

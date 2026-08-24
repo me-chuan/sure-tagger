@@ -31,8 +31,8 @@ Large or machine-local files are intentionally not tracked:
 - `ami_en2001a_utterances/audio/`: generated EN2001a utterance WAV files.
 - Rec-RIR waveform artifacts are written under the selected output directory's
   `artifacts/rir/` subdirectory by default.
-- Speaker diarization metadata artifacts are written under
-  `artifacts/speaker/` when speaker tools produce a valid timeline.
+- Speaker v2 evidence, alignment, and fusion artifacts are written under
+  `artifacts/speaker_v2/<row-key>/`.
 - `api.txt`, `.env*`, `.codex/`: local secrets and private config.
 
 ## Quick Commands
@@ -78,27 +78,26 @@ Compare Brouhaha C50 against Rec-RIR-derived C50 on the bundled manifest:
 python3 scripts/run_c50_method_comparison.py
 ```
 
-Run with MOSS diarization enabled for mixed/mono recordings:
+Run only the speaker stage with the default `quality-shadow` profile:
 
 ```bash
 python3 scripts/run_tagger.py \
   --manifest phase1_asr_samples/manifest.jsonl \
   --output phase1_asr_samples/outputs/sample_tags.jsonl \
-  --moss-diarize-enable \
-  --moss-diarize-python .runtime/moss_transcribe_diarize_py312/bin/python \
-  --moss-diarize-model OpenMOSS-Team/MOSS-Transcribe-Diarize
+  --only-tags speaker \
+  --speaker-profile quality-shadow
 ```
 
-Multi-channel separated-headset WAV inputs use merged-headset MOSS when
-`--moss-diarize-enable` is set and MOSS cannot confirm that every channel has
-exactly one speaker. If MOSS confirms one speaker per channel, the pipeline uses
-the channel-activity route; if the check fails or detects mixed speakers, it
-downmixes headset channels into a temporary mono WAV and runs MOSS diarization.
-Without MOSS, channel activity only runs when the dataset is explicitly asserted
-to have one speaker per channel.
+The main pipeline calls speaker v2 directly; there is no legacy MOSS enable gate,
+native-metadata speaker route, or channel-activity fallback. The default profile
+uses MOSS, FireRed VAD, Sortformer, Pyannote, ECAPA, and Brouhaha as configured by
+`tagger/pipelines/speaker_evidence.py`. `--speaker-profile lean-shadow` selects
+the lower-cost profile. `--speaker-v2-skip-model-verification` only skips pinned
+asset hash checks; it does not download models or disable inference.
 
-Model-backed tools require local model directories/checkpoints configured in
-`tagger/local_config.py`.
+Model-backed tools require local model directories/checkpoints. General acoustic
+tools read `tagger/local_config.py`; speaker v2 defaults are defined in
+`tagger/pipelines/speaker_evidence.py`.
 
 OpenAI Responses topic classification reads credentials in this order:
 `OPENAI_API_KEY`, `--topic-api-key`, `api.txt` or `--topic-api-key-path`, then
@@ -109,16 +108,13 @@ See [the tag and method documentation](docs/tags-and-methods.md) for the public
 fields, preprocessing, and JSON examples. Tool-specific setup details are kept
 in `tagger/tools/basic_acoustic/README.md`,
 `tagger/tools/sound_field_scene/README.md`,
-`tagger/tools/speaker/README.md`, and
+`tagger/tools/speaker_v2/docs/direct_public_output_20260820.md`, and
 `tagger/tools/language_content/README.md`.
 
 ## Speaker Pipeline
 
-Speaker layer supports two routes:
-
-- Mix-Headset / mono mixed recording: MOSS diarize.
-- Multi-channel separated headset: downmix headset channels, then run one MOSS
-  diarize request. Channel activity is only a fallback/baseline.
-
-Pipeline details and metadata examples live in `tagger/tools/speaker/README.md`
-and `tagger/tools/speaker/speaker_metadata_standard.md`.
+The `speaker` stage directly runs speaker v2 and publishes six fields:
+`speaker_count`, `multi_speaker`, `speaker_change_count`, `speaker_change`,
+`overlap_ratio`, and `speaker_overlap`. Model evidence and claim routing remain
+internal under `artifacts/speaker_v2/<row-key>/`; only the six resolved values
+enter the tags-only JSONL output.

@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from tagger.tools.base import ToolResult
 
 
-TOOL_VERSION = "speaker_metrics_v0.1.0"
+TOOL_VERSION = "speaker_metrics_v0.2.0"
 METADATA_VERSION = "speaker_diarization_v0.1"
 
 
@@ -186,7 +186,7 @@ def public_results_from_metadata(metadata):
     summary = metadata.get("recording_summary", {})
     utterance = _select_public_utterance(metadata)
     tool_name = "speaker_metrics"
-    method = "utterance_diarization_flags"
+    method = "utterance_diarization_metrics"
     evidence = {
         "metadata_version": metadata.get("metadata_version"),
         "primary_route": metadata.get("primary_route"),
@@ -194,20 +194,29 @@ def public_results_from_metadata(metadata):
     }
     if utterance is not None:
         fields = [
+            ("speaker.speaker_count", _non_negative_int_or_none(utterance.get("active_speaker_count"))),
             ("speaker.multi_speaker", _bool_from_min_count(utterance.get("active_speaker_count"), 2)),
+            ("speaker.speaker_change_count", _non_negative_int_or_none(utterance.get("speaker_change_count"))),
             ("speaker.speaker_change", _bool_from_positive_count(utterance.get("speaker_change_count"))),
+            ("speaker.overlap_ratio", _ratio_or_none(utterance.get("overlap_ratio"))),
             ("speaker.speaker_overlap", _bool_or_none(utterance.get("is_overlapped"))),
         ]
     elif metadata.get("utterances"):
         fields = [
+            ("speaker.speaker_count", None),
             ("speaker.multi_speaker", None),
+            ("speaker.speaker_change_count", None),
             ("speaker.speaker_change", None),
+            ("speaker.overlap_ratio", None),
             ("speaker.speaker_overlap", None),
         ]
     else:
         fields = [
+            ("speaker.speaker_count", _non_negative_int_or_none(summary.get("speaker_count"))),
             ("speaker.multi_speaker", summary.get("multi_speaker")),
+            ("speaker.speaker_change_count", _non_negative_int_or_none(summary.get("speaker_change_count"))),
             ("speaker.speaker_change", _bool_from_positive_count(summary.get("speaker_change_count"))),
+            ("speaker.overlap_ratio", _ratio_or_none(summary.get("overlap_ratio_speech"))),
             ("speaker.speaker_overlap", _bool_from_positive_ratio(summary.get("overlap_ratio_speech"))),
         ]
     return [
@@ -247,6 +256,21 @@ def _bool_from_min_count(value, minimum):
         return int(value) >= int(minimum)
     except (TypeError, ValueError):
         return None
+
+
+def _non_negative_int_or_none(value):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _ratio_or_none(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    if not math.isfinite(value) or value < 0.0 or value > 1.0:
+        return None
+    return _round_ratio(value)
 
 
 def _bool_from_positive_count(value):

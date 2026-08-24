@@ -8,7 +8,7 @@ import math
 from numbers import Real
 
 from tagger.tools.base import TOOL_VERSION, ToolResult
-from tagger.tools.basic_acoustic.brouhaha_signal_estimator import (
+from tagger.tools.audio_quality.brouhaha_signal_estimator import (
     BrouhahaClient,
     BrouhahaConfig,
     BrouhahaError,

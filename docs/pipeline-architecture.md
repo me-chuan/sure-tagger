@@ -60,16 +60,21 @@ Speaker metadata、Rec-RIR 等非公开中间结果会写到 `--artifact-dir`。
 
 | Stage | 输出 tag path |
 | --- | --- |
-| `language_deterministic` | `language_content.language`, `word_count`, `punctuation`, `repetition`, `filler` |
+| `language_deterministic` | `language_content.word_count`, `punctuation`, `repetition`, `filler` |
 | `topic` | `language_content.topic` |
 | `audio_probe` | `basic_acoustic.duration_sec`, `sample_rate_hz`, `channels` |
 | `silence` | `basic_acoustic.silence_segments`, `silence_ratio` |
-| `speaker` | `speaker.multi_speaker`, `speaker_change`, `speaker_overlap` |
-| `brouhaha` | `basic_acoustic.snr_db`, `basic_acoustic.c50` |
-| `dnsmos` | `basic_acoustic.dnsmos_sig`, `dnsmos_bak`, `dnsmos_ovrl`, `dnsmos_p808` |
-| `firered_aed` | `sound_field_scene.audio_events`, `music` |
-| `panns` | `sound_field_scene.sound` |
-| `recrir` | `sound_field_scene.rt60`, `sound_field_scene.c50` |
+| `speaker` | `speaker.speaker_count`, `multi_speaker`, `speaker_change_count`, `speaker_change`, `overlap_ratio`, `speaker_overlap` |
+| `brouhaha` | `audio_quality.snr_db`（C50 仅作为内部 evidence `internal.brouhaha_c50_db`） |
+| `dnsmos` | `audio_quality.dnsmos_sig`, `dnsmos_bak`, `dnsmos_ovrl`, `dnsmos_p808` |
+| `firered_aed` | `sound_field_scene.speech_music_events`, `music_present` |
+| `dass` | `sound_field_scene.external_noise_type`（docs/DASS.md 类别键）, `noise_composition`（各类别具体标签） |
+| `recrir` | `room_acoustic.rt60_sec`, `room_acoustic.c50_db` |
+| `firered_lid` | `language_content.language` |
+
+`panns`（`sound_field_scene.sound`）已不在默认 full pipeline 中——DASS 是
+背景噪音分类的主模型。panns stage 仍注册在案，可用 `--only-tags panns`
+或 `--only-tags sound_field_scene.sound` 显式选择。
 
 `--only-tags` 可以接收 stage 名、tag group 名或具体 tag path。例如：
 
@@ -94,6 +99,7 @@ silence
 speaker
 dnsmos
 recrir
+firered_lid
 ```
 
 对应 public tags 会被设置为：
@@ -102,17 +108,20 @@ recrir
 language_content.* = null
 basic_acoustic.silence_segments = null
 basic_acoustic.silence_ratio = null
-basic_acoustic.dnsmos_* = null
-sound_field_scene.rt60 = null
-sound_field_scene.c50 = null
+audio_quality.dnsmos_* = null
+room_acoustic.rt60_sec = null
+room_acoustic.c50_db = null
+speaker.speaker_count = 0
 speaker.multi_speaker = false
+speaker.speaker_change_count = 0
 speaker.speaker_change = false
+speaker.overlap_ratio = 0.0
 speaker.speaker_overlap = false
 ```
 
 这些 stage 不会调用外部模型或 API。`audio_probe`、`brouhaha`、`firered_aed`
-和 `panns` 仍可运行，因为它们可以用于纯噪声或无 transcript 音频的基础音频
-分析和声音事件展示。
+和 `dass` 仍可运行，因为它们可以用于纯噪声或无 transcript 音频的基础音频
+分析和声音事件展示。`panns` 需要显式选择才会运行。
 
 补标时这个 guard 仍然生效。若某条无 transcript 样本已有旧标签，但本次又
 选择了上述 speech-dependent stage，pipeline 会按当前规则重置相关字段，以
@@ -135,11 +144,41 @@ tagger/tools/language_content/deterministic.py
 输出：
 
 ```text
-language_content.language
 language_content.word_count
 language_content.punctuation
 language_content.repetition
 language_content.filler
+```
+
+注意：`language_content.language` 不再由文本启发式产出，改由 FireRed LID
+音频模型产出（见 5.11）。
+
+### 5.1b FireRed LID
+
+程序：
+
+```text
+tagger/tools/language_content/firered_lid_detector.py
+```
+
+模型：
+
+```text
+FireRed LID
+models/FireRedASR2S/pretrained_models/FireRedLID/{model.pth.tar,cmvn.ark,dict.txt}
+models/FireRedASR2S/examples_infer/lid/fireredlid
+```
+
+默认 Python 环境：
+
+```text
+.runtime/fireredlid_py311/bin/python
+```
+
+输出：
+
+```text
+language_content.language  （ISO 语言码或 zh-<region> 方言码，如 zh-xinan）
 ```
 
 ### 5.2 Topic
@@ -246,64 +285,56 @@ tagger/tools/basic_acoustic/silence_ratio_calculator.py
 
 ### 5.5 Speaker
 
-优先程序：
+总线程序：
 
 ```text
-tagger/tools/speaker/native_metadata_diarizer.py
-tagger/tools/speaker/metrics.py
+tagger/pipelines/speaker_evidence.py
+tagger/tools/speaker_v2/
 ```
 
-模型：无。优先从 `sample.native_metadata` 中读取：
+`tagger.pipelines.tagging` 直接调用 speaker v2，不经过旧 speaker registry，
+也不再根据 native metadata 或声道布局分流。默认 `quality-shadow` profile 使用：
 
 ```text
-speaker_segments
-diarization_segments
-segments
-utterances
+MOSS-Transcribe-Diarize
+FireRed VAD
+NVIDIA Streaming Sortformer 4spk v2
+Pyannote Community-1
+SpeechBrain ECAPA
+Brouhaha
 ```
 
-segment 需要 start/end 和 speaker 字段。speaker 字段可为：
+公开输出固定为六字段：
 
 ```text
-speaker
-speaker_id
-label
-spk
-```
-
-如果 metadata 可用，pipeline 会先构建 speaker timeline，再由 `metrics.py`
-生成公开标签：
-
-```text
+speaker.speaker_count
 speaker.multi_speaker
+speaker.speaker_change_count
 speaker.speaker_change
+speaker.overlap_ratio
 speaker.speaker_overlap
 ```
 
-fallback route：
+profile 可通过 CLI 选择：
 
-1. 对 separated headset 且明确单通道单说话人的输入，可走
-   `tagger/tools/speaker/channel_activity.py`。
-2. 启用 `--moss-diarize-enable` 后，可走
-   `tagger/tools/speaker/moss_diarizer.py`。
-
-MOSS 默认模型配置：
-
-```text
-models/MOSS-Transcribe-Diarize-model
-.runtime/moss_transcribe_diarize_py312/bin/python
+```bash
+--speaker-profile quality-shadow
+--speaker-profile lean-shadow
 ```
 
-MOSS 默认不启用；只在传入 `--moss-diarize-enable` 或测试注入 client 时运行。
-Speaker 的完整 timeline 和 route 信息写入 `--artifact-dir/speaker/*.json.gz`，
-不进入 public tags-only 输出。
+旧 MOSS 显式启用门禁和 channel-activity fallback 已移除。
+`--speaker-v2-skip-model-verification` 只跳过固定模型资产的 hash 校验，不会
+下载模型，也不会跳过模型推理。完整 evidence、timeline comparison、claim
+route 和 fusion 结果写入
+`--artifact-dir/speaker_v2/<sample-id>-sample-<manifest-line>/`，不进入 public
+tags-only 输出。
 
 ### 5.6 Brouhaha
 
 程序：
 
 ```text
-tagger/tools/basic_acoustic/brouhaha_signal_estimator.py
+tagger/tools/audio_quality/brouhaha_signal_estimator.py
 ```
 
 模型：
@@ -322,16 +353,18 @@ models/brouhaha/brouhaha-vad/models/best/checkpoints/best.ckpt
 输出：
 
 ```text
-basic_acoustic.snr_db
-basic_acoustic.c50
+audio_quality.snr_db
 ```
+
+Brouhaha C50 仍由工具产出（`internal.brouhaha_c50_db`），但只进入内部
+evidence 用于与 Rec-RIR C50 交叉验证，不进入公开输出。
 
 ### 5.7 DNSMOS
 
 程序：
 
 ```text
-tagger/tools/basic_acoustic/dnsmos_quality_estimator.py
+tagger/tools/audio_quality/dnsmos_quality_estimator.py
 ```
 
 模型：
@@ -350,10 +383,10 @@ models/DNS-Challenge/DNSMOS/DNSMOS/model_v8.onnx
 输出：
 
 ```text
-basic_acoustic.dnsmos_sig
-basic_acoustic.dnsmos_bak
-basic_acoustic.dnsmos_ovrl
-basic_acoustic.dnsmos_p808
+audio_quality.dnsmos_sig
+audio_quality.dnsmos_bak
+audio_quality.dnsmos_ovrl
+audio_quality.dnsmos_p808
 ```
 
 ### 5.8 FireRed AED
@@ -380,11 +413,11 @@ models/FireRedVAD/pretrained_models/FireRedVAD/AED
 输出：
 
 ```text
-sound_field_scene.audio_events
-sound_field_scene.music
+sound_field_scene.speech_music_events
+sound_field_scene.music_present
 ```
 
-### 5.9 PANNs
+### 5.9 PANNs（可选，不在默认链路）
 
 程序：
 
@@ -411,16 +444,71 @@ models/audioset_tagging_cnn/checkpoints/Cnn14_mAP=0.431.pth
 sound_field_scene.sound
 ```
 
-默认阈值是 `0.30`，可通过 `--panns-threshold` 修改。
+默认阈值是 `0.30`，可通过 `--panns-threshold` 修改。该 stage 已退出默认
+full pipeline，需要 `--only-tags panns` 或 `--only-tags sound_field_scene.sound`
+显式选择。
+
+### 5.9b DASS
+
+程序：
+
+```text
+tagger/tools/sound_field_scene/dass_noise_type_detector.py
+```
+
+模型：
+
+```text
+DASS medium AudioSet-2M（49M 参数，mAP 48.9）
+models/DASS/saurabhati__DASS_medium_AudioSet_48.9/
+```
+
+checkpoint 由 sure-harness 部署后复制到项目内；权重版本固定在
+`DASS_MODEL_VERSION`（`huggingface:saurabhati/DASS_medium_AudioSet_48.9@250cdd3…`）。
+
+默认 Python 环境（sure-harness 的模型 venv）：
+
+```text
+~/sure-harness_v1/sure/models/saurabhati__DASS_medium_AudioSet_48.9/.venv/bin/python
+```
+
+输出：
+
+```text
+sound_field_scene.external_noise_type
+sound_field_scene.noise_composition
+```
+
+DASS 是默认链路的背景噪音主模型。`external_noise_type` 输出的是
+docs/DASS.md 的类别键（`music`/`animal`/`mechanical`/`nature`/`formless`/
+`channel_environment`）：全量 527 类向量中任一未被排除的标签达到默认
+阈值 `0.25`（2026-08-24 在 phase2 上校准，见 docs/tags-and-methods.md
+3.4 说明），其所属类别即进入结果，按各类别最高分降序排列；排除政策
+同样作用于类别推导（Silence 不会把干净语音样本标成 `formless`），
+人类声音与未归类标签永不公开。阈值可通过 `--dass-threshold` 修改。
+默认排除策略与 PANNs 相同（主语音、静音、声学场景、混响、回声不算
+背景噪音），只作用于内部 evidence 的 top 事件；传 `--no-exclusion`
+后排除策略整体关闭，便于观察原始类别分布。成功但没有达到阈值的
+类别时输出空数组，工具失败时输出 `null`。
+
+`noise_composition` 把 `external_noise_type` 的每个类别展开为具体标签：
+全量 527 维 sigmoid 向量按 docs/DASS.md 的类别归组（映射表在
+`tagger/tools/sound_field_scene/dass_categories.py`，不受排除策略影响），
+公开 `music`/`animal`/`mechanical`/`nature`/`formless`/
+`channel_environment` 六个键，每类 top-3（`--dass-composition-top-k`）且
+不低于 0.3（`--dass-composition-threshold`）。音乐类别以 FireRed AED 的
+`music_present` 门控（AED 先于 DASS 运行）；人类声音和未归类标签只进
+内部 evidence 的 `category_events`，声道/环境/背景类别的分数也在其中，
+留作 far_field/混响标签的补充证据。
 
 ### 5.10 Rec-RIR
 
 程序：
 
 ```text
-tagger/tools/sound_field_scene/rir_estimator.py
-tagger/tools/sound_field_scene/rt60_estimator.py
-tagger/tools/sound_field_scene/c50_estimator.py
+tagger/tools/room_acoustic/rir_estimator.py
+tagger/tools/room_acoustic/rt60_estimator.py
+tagger/tools/room_acoustic/c50_estimator.py
 ```
 
 模型：
@@ -440,12 +528,16 @@ models/Rec-RIR/ckpt/epoch35.tar
 输出：
 
 ```text
-sound_field_scene.rt60
-sound_field_scene.c50
+room_acoustic.rt60_sec
+room_acoustic.c50_db
 ```
 
 RIR 结果作为内部 artifact 保存，public tags-only 输出只保留派生出的 RT60 和
 C50。
+
+### 5.11 FireRed LID
+
+见 5.1b。
 
 ## 6. 补充标签模式
 
@@ -481,7 +573,7 @@ tags，再运行本次指定的 stage。
 
 ```bash
 --only-tags language_content.topic
---only-tags speaker.multi_speaker,speaker.speaker_change,speaker.speaker_overlap
+--only-tags speaker.speaker_count,speaker.multi_speaker,speaker.speaker_change_count,speaker.speaker_change,speaker.overlap_ratio,speaker.speaker_overlap
 --only-tags basic_acoustic.silence_segments,basic_acoustic.silence_ratio
 ```
 
@@ -502,8 +594,7 @@ tags，再运行本次指定的 stage。
 ```
 
 会调度 speaker stage；speaker stage 运行后可能同时写入
-`speaker.multi_speaker`、`speaker.speaker_change` 和
-`speaker.speaker_overlap`。如果旧结果中这三个字段都为空，这通常是期望行为；
+全部六个 `speaker.*` 字段。如果旧结果中这些字段都为空，这通常是期望行为；
 如果只想严格保留同 stage 的其它旧字段，当前 pipeline 还没有字段级执行模式。
 
 如果补标 stage 需要依赖 duration/channels，而旧 tags 中没有这些值，
@@ -512,7 +603,8 @@ pipeline 会自动补跑 `audio_probe`。例如只补 `speaker.*` 时，如果
 
 无 transcript guard 在补标模式也会生效。也就是说，对 transcript 为空的样本
 补 `topic`、`silence`、`speaker`、`dnsmos` 或 `recrir` 时，pipeline 不会调用
-对应模型，而会按当前规则写入 `null` 或 speaker 的 `false`。
+对应模型，而会按当前规则写入 `null`，或把 speaker count/ratio 写为零、
+boolean 写为 `false`。
 
 ## 7. 常用命令
 
@@ -563,6 +655,7 @@ PYTHONPATH=. python3 scripts/run_tagger.py \
   --input-tags outputs/old_ami_tags.jsonl \
   --output outputs/ami_speaker_patch.jsonl \
   --artifact-dir outputs/ami_speaker_artifacts \
-  --only-tags speaker.multi_speaker,speaker.speaker_change,speaker.speaker_overlap \
+  --only-tags speaker \
+  --speaker-profile quality-shadow \
   --missing-only
 ```

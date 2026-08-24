@@ -304,6 +304,11 @@ def prepare_dataset(
             target_duration_sec=target_duration_sec,
             max_duration_sec=max_duration_sec,
         )
+        # The endpoint padding may extend beyond a recording that ends shortly
+        # after its final annotation. Do not ask wave.readframes() for frames
+        # that cannot exist; the source-duration check above still rejects
+        # annotations that themselves exceed the recording.
+        boundaries[-1] = min(boundaries[-1], source_duration)
         specs = build_segment_specs(utterances, boundaries, frame_rate)
 
         with tempfile.TemporaryDirectory(
