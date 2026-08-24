@@ -12,12 +12,11 @@
         <p class="eyebrow">Sure Tagger / Phase 2</p>
         <h1>ASR 数据集二次打标展示</h1>
         <p class="lead">
-          将 phase2 ASR manifest、音频、transcript 和原始 metadata 转换为统一标签：声学质量、声场场景、语言内容 topic、静音片段和多说话人信息。
+          将 phase2 ASR manifest、音频、transcript 和原始 metadata 转换为统一标签：基础声学、音频质量（Brouhaha/DNSMOS）、空间声学（Rec-RIR）、声场场景（FireRed AED + DASS 分类背景声）、语言内容和多说话人信息。
         </p>
       </div>
       <nav class="topnav" aria-label="页面导航">
         <a href="#workflow">流程</a>
-        <a href="#ami-analysis">AMI</a>
         <a href="#samples">样本</a>
         <a href="#coverage">覆盖</a>
       </nav>
@@ -27,7 +26,7 @@
       <section class="summary-band" aria-labelledby="summary-title">
         <div class="section-heading">
           <p class="eyebrow">Current run</p>
-          <h2 id="summary-title">Phase 2 全量补标结果</h2>
+          <h2 id="summary-title">Phase 2 全量打标结果</h2>
         </div>
         <div class="metric-grid" id="metricGrid"></div>
       </section>
@@ -46,43 +45,17 @@
           <article class="pipeline-step">
             <span class="step-index">02</span>
             <h3>Language Layer</h3>
-            <p>对 transcript 做确定性语言标签，并用 OpenAI Responses 生成层级 topic。</p>
+            <p>对 transcript 做确定性语言标签，音频语言由 FireRed LID 识别；topic 需 --topic-enable 显式开启。</p>
           </article>
           <article class="pipeline-step">
             <span class="step-index">03</span>
             <h3>Acoustic + Scene</h3>
-            <p>提取时长、SNR、DNSMOS、RT60、C50、音频事件；有原始分段时静音片段优先来自 metadata。</p>
+            <p>提取时长、静音片段、SNR、DNSMOS、RT60、C50；AED 检出 speech/singing/music，DASS 输出背景噪音类别与分类组成。</p>
           </article>
           <article class="pipeline-step">
             <span class="step-index">04</span>
             <h3>Unified Tags</h3>
-            <p>输出按 tag group 组织的 JSON，speaker 标签优先使用 utterance metadata，缺失时再退回 MOSS diarize。</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="ami-band" id="ami-analysis" aria-labelledby="ami-title">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">AMI Analysis</p>
-            <h2 id="ami-title">AMI 切分与有无标注对比</h2>
-          </div>
-        </div>
-        <div class="ami-layout">
-          <article class="ami-panel">
-            <h3>切分逻辑</h3>
-            <div class="ami-metrics" id="amiSplitMetrics"></div>
-            <ol class="ami-steps" id="amiSplitSteps"></ol>
-          </article>
-          <article class="ami-panel">
-            <div class="ami-panel-header">
-              <div>
-                <h3>无原生标注 vs 有 utterance 标注</h3>
-                <p>以 EN2001a 片段作为 AMI 示例，比较同一批音频在无 native metadata 输入和带 utterance metadata 输入下的标签差异。</p>
-              </div>
-            </div>
-            <div class="ami-tabs" id="amiCompareTabs" aria-label="AMI 对比样本"></div>
-            <div class="ami-compare-detail" id="amiCompareDetail"></div>
+            <p>输出按 tag group 组织的 JSON；speaker 由 quality-shadow 多模型融合（Sortformer/Pyannote/MOSS/ECAPA）。</p>
           </article>
         </div>
       </section>
@@ -158,8 +131,8 @@
     </main>
 
     <footer class="footer">
-      <span>Demo data: phase2 full pipeline tags + topic/speaker supplement</span>
-      <span>Speaker 标签优先走 metadata，缺失 metadata 时使用本地 MOSS diarize；无 transcript 噪声样本补为非多说话人。</span>
+      <span>Demo data: phase2 full pipeline tags（outputs/phase2_full_tags.jsonl，scripts/build_demo_data.py 生成）</span>
+      <span>speaker 为 quality-shadow 多模型融合；无 transcript 噪声样本按 guard 跳过 speech 相关 stage。</span>
     </footer>
 
     <script src="data.js"></script>
