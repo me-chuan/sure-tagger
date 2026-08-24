@@ -3,7 +3,7 @@ window.DEMO_DATA = {
     "sampleCount": 40,
     "datasetCount": 8,
     "selectedCount": 40,
-    "rirArtifactCount": 25,
+    "rirArtifactCount": 40,
     "datasets": [
       {
         "name": "LibriSpeech",
