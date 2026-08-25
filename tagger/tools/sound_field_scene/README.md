@@ -21,7 +21,8 @@ boolean for compatibility:
 
 Validated `speech`/`singing`/`music` segments and upstream thresholded-frame
 ratios are retained as internal tool evidence and do not enter the tags-only
-public output. PANNs separately owns the general background-sound tag.
+public output. General background-sound composition is owned by the DASS
+tool below.
 
 Run an AED-only smoke test:
 
@@ -35,24 +36,21 @@ for result in run("models/FireRedVAD/assets/event.wav", duration_sec=22.016):
 PY
 ```
 
-## PANNs Background-Sound Detection（可选，不在默认链路）
+## PANNs Background-Sound Detection（已废弃，2026-08-25）
 
 The PANNs adapter uses the upstream AudioSet Cnn14 model pinned at commit
 `d2f4b8c18eab44737fcc0de1248ae21eb43f6aa4`. It normalizes audio to 32 kHz
 mono, runs non-overlapping 10-second chunks, and takes the maximum eligible
-event probability across the sample. PANNs is no longer part of the default
-full pipeline; select it explicitly with `--only-tags panns` or
-`--only-tags sound_field_scene.sound`.
+event probability across the sample.
 
-`sound_field_scene.sound` is a score-ranked list of eligible AudioSet display
-names whose maximum clip probability is at least `0.30`. At most ten names are
-published. Music, singing, chatter, animals, natural sounds, vehicles,
-mechanisms, and noise are eligible. Primary speech, silence, room/outdoor scene
-labels, reverberation, and echo are excluded. A successful inference with no
-class at the threshold produces `[]`; model failure produces `null`. Scores,
-AudioSet IDs, and chunk details remain internal evidence.
+The panns stage and its public `sound_field_scene.sound` field were removed
+on 2026-08-25 — `sound_field_scene.noise_composition` (DASS) supersedes them.
+The tool module, model, and runtime are kept for future cross-validation
+evidence work, but the stage is not registered, cannot be selected via
+`--only-tags`, and its output must not enter public tags.
 
-Set up the pinned source and dedicated environment:
+Set up the pinned source and dedicated environment (if ever needed for
+evidence work):
 
 ```bash
 bash scripts/setup_panns_background.sh
@@ -99,9 +97,9 @@ The default was lowered from the AudioSet multi-label convention `0.50`
 after calibrating on the phase2 sample set: DASS-medium sigmoid scores for
 real noise classes are soft (roughly 0.1–0.45), while clean speech stays
 below 0.15, so `0.25` recovers real noise labels without false positives on
-clean speech. By default the exclusion policy matches PANNs — primary
+clean speech. The default exclusion policy — primary
 speech, silence, room/outdoor scene labels, reverberation, and echo are not
-background noise — and affects only the ranked top-event evidence; it is
+background noise — affects only the ranked top-event evidence; it is
 all-or-nothing, so pass `--no-exclusion` to keep every AudioSet class
 eligible so the raw class distribution stays visible. A successful
 inference with no category at the threshold produces `[]`; model failure
@@ -114,8 +112,9 @@ per `docs/DASS.md` by the mapping in `dass_categories.py` into six public
 keys — `music`, `animal`, `mechanical`, `nature`, `formless`,
 `channel_environment` — plus evidence-only `human` and `other` buckets. Each
 public key holds a score-ranked list of at most `--dass-composition-top-k`
-(default 3) labels at or above `--dass-composition-threshold` (default 0.30,
-independent of the 0.25 external threshold). The music bucket is gated by
+(default 3) labels at or above `--dass-composition-threshold` (default 0.25,
+aligned with the category threshold since 2026-08-25, so every present
+category has a non-empty bucket). The music bucket is gated by
 FireRed AED `music_present`: `false` empties it, `true` or an unavailable AED
 (`null`) keeps the DASS music labels. Per-category scores, the `human` and
 `other` buckets, and the gate state stay in internal evidence
@@ -135,9 +134,7 @@ print("winning:", result.evidence["winning_event"])
 PY
 ```
 
-The full tagging pipeline enables FireRed AED and DASS by default; PANNs must
-be selected explicitly (`--only-tags panns`). Use `--firered-aed-use-gpu` or
-`--dass-use-gpu` for GPU inference, `--dass-threshold` (default 0.25) to
-override the DASS threshold, and `--no-exclusion` to keep every AudioSet
-class eligible. PANNs flags (`--panns-use-gpu`, `--panns-threshold`) only
-apply when the panns stage is selected.
+The full tagging pipeline enables FireRed AED and DASS by default. Use
+`--firered-aed-use-gpu` or `--dass-use-gpu` for GPU inference,
+`--dass-threshold` (default 0.25) to override the DASS threshold, and
+`--no-exclusion` to keep every AudioSet class eligible.

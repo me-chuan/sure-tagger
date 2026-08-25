@@ -12,7 +12,6 @@ from scripts.run_c50_method_comparison import compare_record as compare_c50_reco
 from tagger.input_schema import InputSchemaError, validate_input_record
 from tagger.pipelines.tagging import (
     FULL_STAGES,
-    STAGE_PANNS,
     _stages_for_tag_paths,
     audit_audio_quality,
     audit_basic_acoustic,
@@ -65,13 +64,6 @@ from tagger.tools.sound_field_scene.firered_aed_detector import (
     FireRedAedError,
     run as run_firered_aed_detector,
     validate_aed_output,
-)
-from tagger.tools.sound_field_scene.panns_background_detector import (
-    PannsBackgroundConfig,
-    PannsBackgroundError,
-    run as run_panns_background_detector,
-    select_background_events,
-    validate_panns_output,
 )
 from tagger.tools.room_acoustic.rir_estimator import (
     RecRirConfig,
@@ -254,7 +246,6 @@ class AcousticToolsTest(unittest.TestCase):
                     [
                         "speech_music_events",
                         "music_present",
-                        "sound",
                         "external_noise_type",
                         "noise_composition",
                     ]
@@ -265,9 +256,6 @@ class AcousticToolsTest(unittest.TestCase):
                 ["speech", "music"],
             )
             self.assertTrue(tags["sound_field_scene"]["music_present"])
-            # PANNs is not part of the default pipeline anymore; the sound
-            # field stays null unless the panns stage is selected explicitly.
-            self.assertIsNone(tags["sound_field_scene"]["sound"])
             self.assertEqual(
                 tags["sound_field_scene"]["external_noise_type"],
                 ["mechanical"],
@@ -681,90 +669,6 @@ class AcousticToolsTest(unittest.TestCase):
         self.assertEqual(by_path["sound_field_scene.speech_music_events"], [])
         self.assertFalse(by_path["sound_field_scene.music_present"])
 
-    def test_panns_background_detector_uses_inclusive_threshold(self):
-        result = run_panns_background_detector(
-            "audio.wav",
-            config=PannsBackgroundConfig(threshold=0.3, subprocess_python=""),
-            client=FakePannsBackgroundClient(
-                make_panns_output(0.3, "/m/04rlf", "Music")
-            ),
-        )
-
-        self.assertEqual(result.tag_path, "sound_field_scene.sound")
-        self.assertEqual(result.value, ["Music"])
-        self.assertEqual(result.evidence["max_background_score"], 0.3)
-        self.assertEqual(result.evidence["winning_event"]["mid"], "/m/04rlf")
-
-    def test_panns_background_detector_returns_empty_list_below_threshold(self):
-        result = run_panns_background_detector(
-            "audio.wav",
-            config=PannsBackgroundConfig(threshold=0.3, subprocess_python=""),
-            client=FakePannsBackgroundClient(
-                make_panns_output(0.299999, "/m/0btp2", "Traffic noise")
-            ),
-        )
-
-        self.assertEqual(result.value, [])
-
-    def test_panns_background_detector_returns_ranked_classes_above_threshold(self):
-        events = [
-            {
-                "index": 1,
-                "mid": "/m/0btp2",
-                "display_name": "Traffic noise",
-                "score": 0.7,
-            },
-            {
-                "index": 2,
-                "mid": "/m/07yv9",
-                "display_name": "Vehicle",
-                "score": 0.4,
-            },
-            {
-                "index": 3,
-                "mid": "/m/096m7z",
-                "display_name": "Noise",
-                "score": 0.2,
-            },
-        ]
-        result = run_panns_background_detector(
-            "audio.wav",
-            config=PannsBackgroundConfig(threshold=0.3, subprocess_python=""),
-            client=FakePannsBackgroundClient(
-                {
-                    "chunk_count": 1,
-                    "max_background_score": 0.7,
-                    "winning_event": dict(events[0]),
-                    "top_background_events": events,
-                }
-            ),
-        )
-
-        self.assertEqual(result.value, ["Traffic noise", "Vehicle"])
-
-    def test_panns_background_selection_excludes_primary_speech_and_scene(self):
-        summary = select_background_events(
-            [
-                {"index": 0, "mid": "/m/09x0r", "display_name": "Speech"},
-                {
-                    "index": 1,
-                    "mid": "/t/dd00125",
-                    "display_name": "Inside, small room",
-                },
-                {"index": 2, "mid": "/m/04rlf", "display_name": "Music"},
-            ],
-            [0.99, 0.95, 0.31],
-        )
-
-        self.assertEqual(summary["max_background_score"], 0.31)
-        self.assertEqual(summary["winning_event"]["mid"], "/m/04rlf")
-
-    def test_panns_background_output_rejects_excluded_winner(self):
-        with self.assertRaises(PannsBackgroundError):
-            validate_panns_output(
-                make_panns_output(0.9, "/m/09x0r", "Speech")
-            )
-
     def test_dass_noise_type_detector_uses_inclusive_threshold(self):
         results = run_dass_noise_type_detector(
             "audio.wav",
@@ -792,6 +696,25 @@ class AcousticToolsTest(unittest.TestCase):
 
         self.assertEqual(
             by_path["sound_field_scene.external_noise_type"].value, ["mechanical"]
+        )
+
+    def test_dass_composition_threshold_default_aligns_with_categories(self):
+        # Regressed on 2026-08-25: the composition default was 0.30 while the
+        # category default was 0.25, so labels scoring in the 0.25-0.30 band
+        # (e.g. CHiME4 / TUT mechanical labels) produced a present category
+        # with an empty composition bucket. The defaults are now aligned so a
+        # present category always has a non-empty composition bucket.
+        self.assertEqual(DassNoiseTypeConfig().composition_threshold, 0.25)
+        results = run_dass_noise_type_detector(
+            "audio.wav",
+            config=DassNoiseTypeConfig(subprocess_python=""),
+            client=FakeDassNoiseTypeClient(make_dass_output(0.3, "Traffic noise")),
+        )
+        by_path = {result.tag_path: result for result in results}
+
+        self.assertEqual(
+            by_path["sound_field_scene.noise_composition"].value["mechanical"],
+            ["Traffic noise"],
         )
 
     def test_dass_noise_type_detector_returns_empty_list_below_threshold(self):
@@ -967,11 +890,17 @@ class AcousticToolsTest(unittest.TestCase):
             [],
         )
 
-    def test_default_full_pipeline_excludes_panns_stage(self):
-        self.assertNotIn(STAGE_PANNS, FULL_STAGES)
-        self.assertNotIn(STAGE_PANNS, _stages_for_tag_paths(None))
-        self.assertIn(STAGE_PANNS, _stages_for_tag_paths(["panns"]))
-        self.assertIn(STAGE_PANNS, _stages_for_tag_paths(["sound_field_scene.sound"]))
+    def test_dass_tag_paths_are_not_selectable_stages(self):
+        # Deprecated on 2026-08-25: the PANNs stage and its public
+        # ``sound_field_scene.sound`` field were removed (noise_composition
+        # supersedes them). Selecting "panns" or "sound_field_scene.sound"
+        # must now raise instead of silently no-opping.
+        self.assertNotIn("panns", FULL_STAGES)
+        self.assertNotIn("panns", _stages_for_tag_paths(None))
+        with self.assertRaises(ValueError):
+            _stages_for_tag_paths(["panns"])
+        with self.assertRaises(ValueError):
+            _stages_for_tag_paths(["sound_field_scene.sound"])
 
     def test_tagging_pipeline_publishes_dass_all_classes_without_exclusion(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1006,27 +935,23 @@ class AcousticToolsTest(unittest.TestCase):
                 },
             )
 
-    def test_tagging_pipeline_runs_panns_when_explicitly_selected(self):
+    def test_tagging_pipeline_rejects_deprecated_panns_selection(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "tone.wav"
             write_test_wav(path, sample_rate=16000, channels=1, duration_sec=1.0)
 
-            tags = tag_sample_record(
-                make_record(str(path)),
-                tmpdir,
-                selected_tag_paths=["panns"],
-                panns_config=PannsBackgroundConfig(
-                    threshold=0.3, subprocess_python=""
-                ),
-                panns_client=FakePannsBackgroundClient(
-                    make_panns_output(0.6, "/m/0btp2", "Traffic noise")
-                ),
-            )
-
-            self.assertEqual(tags["sound_field_scene"]["sound"], ["Traffic noise"])
-            self.assertIsNone(
-                tags["sound_field_scene"]["external_noise_type"]
-            )
+            with self.assertRaises(ValueError):
+                tag_sample_record(
+                    make_record(str(path)),
+                    tmpdir,
+                    selected_tag_paths=["panns"],
+                )
+            with self.assertRaises(ValueError):
+                tag_sample_record(
+                    make_record(str(path)),
+                    tmpdir,
+                    selected_tag_paths=["sound_field_scene.sound"],
+                )
 
     def test_tagging_pipeline_nulls_dass_noise_type_on_failure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1548,7 +1473,6 @@ class AcousticToolsTest(unittest.TestCase):
         sound_field_scene = {
             "speech_music_events": ["music", "speech"],
             "music_present": True,
-            "sound": True,
             "external_noise_type": ["mechanical", "human"],
             "noise_composition": {
                 "music": [],
@@ -1563,24 +1487,53 @@ class AcousticToolsTest(unittest.TestCase):
         warnings = audit_sound_field_scene(sound_field_scene)
 
         self.assertIsNone(sound_field_scene["speech_music_events"])
-        self.assertIsNone(sound_field_scene["sound"])
         self.assertIsNone(sound_field_scene["external_noise_type"])
         self.assertIsNone(sound_field_scene["noise_composition"])
         self.assertEqual(
             [warning["field"] for warning in warnings],
             [
                 "speech_music_events",
-                "sound",
                 "external_noise_type",
                 "noise_composition",
             ],
         )
 
+    def test_sound_field_auditor_drops_deprecated_sound_key(self):
+        # Deprecated on 2026-08-25: the PANNs stage and its public
+        # ``sound_field_scene.sound`` field were removed (noise_composition
+        # supersedes them). Stale inputs carrying the key get it deleted; a
+        # non-null stale value additionally yields a deprecation warning.
+        sound_field_scene = {
+            "speech_music_events": ["speech"],
+            "music_present": False,
+            "sound": ["Noise"],
+            "external_noise_type": [],
+            "noise_composition": {
+                "music": [],
+                "animal": [],
+                "mechanical": [],
+                "nature": [],
+                "formless": [],
+                "channel_environment": [],
+            },
+        }
+
+        warnings = audit_sound_field_scene(sound_field_scene)
+
+        self.assertNotIn("sound", sound_field_scene)
+        self.assertEqual(
+            warnings,
+            [{"type": "deprecated_sound_field_scene_value", "field": "sound"}],
+        )
+
+        stale_null = {"sound": None}
+        self.assertEqual(audit_sound_field_scene(stale_null), [])
+        self.assertNotIn("sound", stale_null)
+
     def test_sound_field_auditor_accepts_valid_noise_composition(self):
         sound_field_scene = {
             "speech_music_events": ["speech"],
             "music_present": False,
-            "sound": None,
             "external_noise_type": [],
             "noise_composition": {
                 "music": [],
@@ -1668,15 +1621,7 @@ class AcousticToolsTest(unittest.TestCase):
                         },
                     }
                 ),
-                panns_config=PannsBackgroundConfig(
-                    threshold=0.3,
-                    subprocess_python="",
-                ),
-                panns_client=FakePannsBackgroundClient(
-                    make_panns_output(0.4, "/m/096m7z", "Noise")
-                ),
                 selected_tag_paths=[
-                    "panns",
                     "recrir",
                     "firered_aed",
                 ],
@@ -1692,7 +1637,7 @@ class AcousticToolsTest(unittest.TestCase):
                 tags["sound_field_scene"]["speech_music_events"], ["speech"]
             )
             self.assertFalse(tags["sound_field_scene"]["music_present"])
-            self.assertEqual(tags["sound_field_scene"]["sound"], ["Noise"])
+            self.assertNotIn("sound", tags["sound_field_scene"])
 
             artifacts = list((artifact_dir / "rir").glob("*.rir.json.gz"))
             self.assertEqual(len(artifacts), 1)
@@ -1701,7 +1646,7 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertEqual(artifact["sample_rate_hz"], 16000)
             self.assertEqual(len(artifact["samples"]), len(rir_samples))
 
-    def test_tagging_pipeline_isolates_music_and_sound_failures(self):
+    def test_tagging_pipeline_isolates_music_failures(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "tone.wav"
             write_test_wav(path, sample_rate=16000, channels=1, duration_sec=1.0)
@@ -1723,47 +1668,19 @@ class AcousticToolsTest(unittest.TestCase):
                 ),
                 "dnsmos_config": DnsmosConfig(subprocess_python=""),
                 "firered_aed_config": FireRedAedConfig(subprocess_python=""),
-                "panns_config": PannsBackgroundConfig(subprocess_python=""),
-            }
-            fire_output = {
-                "event2timestamps": {
-                    "speech": [],
-                    "singing": [],
-                    "music": [[0.1, 0.9]],
-                },
-                "event2ratio": {"speech": 0.0, "singing": 0.0, "music": 0.8},
             }
 
-            panns_failure = tag_sample_record(
-                make_record(str(path)),
-                tmpdir,
-                selected_tag_paths=["panns", "firered_aed"],
-                firered_aed_client=FakeFireRedAedClient(fire_output),
-                panns_client=FakePannsBackgroundClient(
-                    make_panns_output(0.9, "/m/09x0r", "Speech")
-                ),
-                **common
-            )
             fire_failure = tag_sample_record(
                 make_record(str(path)),
                 tmpdir,
-                selected_tag_paths=["panns", "firered_aed"],
+                selected_tag_paths=["firered_aed"],
                 firered_aed_client=FakeFireRedAedClient({}),
-                panns_client=FakePannsBackgroundClient(
-                    make_panns_output(0.8, "/m/096m7z", "Noise")
-                ),
                 **common
             )
 
-            self.assertTrue(panns_failure["sound_field_scene"]["music_present"])
-            self.assertEqual(
-                panns_failure["sound_field_scene"]["speech_music_events"],
-                ["music"],
-            )
-            self.assertIsNone(panns_failure["sound_field_scene"]["sound"])
             self.assertIsNone(fire_failure["sound_field_scene"]["music_present"])
             self.assertIsNone(fire_failure["sound_field_scene"]["speech_music_events"])
-            self.assertEqual(fire_failure["sound_field_scene"]["sound"], ["Noise"])
+            self.assertNotIn("sound", fire_failure["sound_field_scene"])
 
     def test_c50_comparison_reports_brouhaha_and_recrir_values(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2165,14 +2082,6 @@ class FakeFireRedAedClient:
         return self.output
 
 
-class FakePannsBackgroundClient:
-    def __init__(self, output):
-        self.output = output
-
-    def estimate(self, audio_path, context=None):
-        return self.output
-
-
 class FakeDassNoiseTypeClient:
     def __init__(self, output):
         self.output = output
@@ -2219,21 +2128,6 @@ class FakeRecRirClient:
     def estimate_rir(self, audio_path, context=None):
         self.call_count += 1
         return self.output
-
-
-def make_panns_output(score, mid, display_name):
-    event = {
-        "index": 1,
-        "mid": mid,
-        "display_name": display_name,
-        "score": score,
-    }
-    return {
-        "chunk_count": 1,
-        "max_background_score": score,
-        "winning_event": dict(event),
-        "top_background_events": [dict(event)],
-    }
 
 
 def make_dass_output(score, display_name, extra_events=None, extra_vector_events=None):
@@ -2298,11 +2192,6 @@ def missing_external_model_configs(tmpdir):
         ),
         "firered_aed_config": FireRedAedConfig(
             model_dir=str(root / "missing_aed"),
-            subprocess_python="",
-        ),
-        "panns_config": PannsBackgroundConfig(
-            repo_dir=str(root / "missing_panns_repo"),
-            checkpoint_path=str(root / "missing_panns.pth"),
             subprocess_python="",
         ),
         "dass_config": DassNoiseTypeConfig(

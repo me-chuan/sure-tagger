@@ -72,9 +72,10 @@ Speaker metadata、Rec-RIR 等非公开中间结果会写到 `--artifact-dir`。
 | `recrir` | `room_acoustic.rt60_sec`, `room_acoustic.c50_db` |
 | `firered_lid` | `language_content.language` |
 
-`panns`（`sound_field_scene.sound`）已不在默认 full pipeline 中——DASS 是
-背景噪音分类的主模型。panns stage 仍注册在案，可用 `--only-tags panns`
-或 `--only-tags sound_field_scene.sound` 显式选择。
+`panns`（`sound_field_scene.sound`）已于 2026-08-25 废弃删除——DASS 是
+背景噪音分类的主模型，具体标签由 `sound_field_scene.noise_composition`
+展开。`panns_background_detector` 模块保留可导入，仅作后续交叉验证
+evidence 用，不注册、不进入公开输出。
 
 `--only-tags` 可以接收 stage 名、tag group 名或具体 tag path。例如：
 
@@ -121,7 +122,7 @@ speaker.speaker_overlap = false
 
 这些 stage 不会调用外部模型或 API。`audio_probe`、`brouhaha`、`firered_aed`
 和 `dass` 仍可运行，因为它们可以用于纯噪声或无 transcript 音频的基础音频
-分析和声音事件展示。`panns` 需要显式选择才会运行。
+分析和声音事件展示。
 
 补标时这个 guard 仍然生效。若某条无 transcript 样本已有旧标签，但本次又
 选择了上述 speech-dependent stage，pipeline 会按当前规则重置相关字段，以
@@ -417,7 +418,7 @@ sound_field_scene.speech_music_events
 sound_field_scene.music_present
 ```
 
-### 5.9 PANNs（可选，不在默认链路）
+### 5.9 PANNs（已废弃，2026-08-25）
 
 程序：
 
@@ -438,15 +439,10 @@ models/audioset_tagging_cnn/checkpoints/Cnn14_mAP=0.431.pth
 .runtime/panns_py310/bin/python
 ```
 
-输出：
-
-```text
-sound_field_scene.sound
-```
-
-默认阈值是 `0.30`，可通过 `--panns-threshold` 修改。该 stage 已退出默认
-full pipeline，需要 `--only-tags panns` 或 `--only-tags sound_field_scene.sound`
-显式选择。
+PANNs stage 与 `sound_field_scene.sound` 字段已于 2026-08-25 废弃删除
+（`noise_composition` 取代其功能）。工具模块、模型与 runtime 均保留，
+供后续交叉验证 evidence 使用，但 stage 未注册、不可通过 `--only-tags`
+选择，其输出不得进入公开 tags。
 
 ### 5.9b DASS
 
@@ -486,8 +482,8 @@ docs/DASS.md 的类别键（`music`/`animal`/`mechanical`/`nature`/`formless`/
 3.4 说明），其所属类别即进入结果，按各类别最高分降序排列；排除政策
 同样作用于类别推导（Silence 不会把干净语音样本标成 `formless`），
 人类声音与未归类标签永不公开。阈值可通过 `--dass-threshold` 修改。
-默认排除策略与 PANNs 相同（主语音、静音、声学场景、混响、回声不算
-背景噪音），只作用于内部 evidence 的 top 事件；传 `--no-exclusion`
+默认排除策略（主语音、静音、声学场景、混响、回声不算
+背景噪音）只作用于内部 evidence 的 top 事件；传 `--no-exclusion`
 后排除策略整体关闭，便于观察原始类别分布。成功但没有达到阈值的
 类别时输出空数组，工具失败时输出 `null`。
 
@@ -496,7 +492,8 @@ docs/DASS.md 的类别键（`music`/`animal`/`mechanical`/`nature`/`formless`/
 `tagger/tools/sound_field_scene/dass_categories.py`，不受排除策略影响），
 公开 `music`/`animal`/`mechanical`/`nature`/`formless`/
 `channel_environment` 六个键，每类 top-3（`--dass-composition-top-k`）且
-不低于 0.3（`--dass-composition-threshold`）。音乐类别以 FireRed AED 的
+不低于 0.25（`--dass-composition-threshold`，2026-08-25 起默认值与类别
+阈值对齐，保证有类别的行组成非空）。音乐类别以 FireRed AED 的
 `music_present` 门控（AED 先于 DASS 运行）；人类声音和未归类标签只进
 内部 evidence 的 `category_events`，声道/环境/背景类别的分数也在其中，
 留作 far_field/混响标签的补充证据。

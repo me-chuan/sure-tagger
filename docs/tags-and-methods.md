@@ -16,13 +16,12 @@ python3 scripts/run_tagger.py \
   --output phase1_asr_samples/outputs/full_pipeline_tags.jsonl
 ```
 
-在当前部署环境中让 PANNs 和 Rec-RIR 使用 GPU 0：
+在当前部署环境中让 Rec-RIR 使用 GPU 0：
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python3 scripts/run_tagger.py \
   --manifest phase1_asr_samples/manifest.jsonl \
   --output phase1_asr_samples/outputs/full_pipeline_tags.jsonl \
-  --panns-use-gpu \
   --recrir-use-gpu
 ```
 
@@ -160,15 +159,12 @@ Brouhaha 同时预测逐帧 C50，但该值只作为内部 evidence
 | --- | --- | --- | --- |
 | `sound_field_scene.speech_music_events` | string array | FireRed AED | 检出的 `speech`、`singing`、`music` 类别，始终按这个固定顺序排列。事件时间段和帧比例仅保留为内部 evidence。 |
 | `sound_field_scene.music_present` | boolean | FireRed AED | `speech_music_events` 是否包含 `music`。保留该字段用于直接进行音乐样本筛选。 |
-| `sound_field_scene.sound` | string array | PANNs Cnn14 / AudioSet | 达到阈值的具体背景声类别，按模型分数从高到低排列，最多 10 类。公开结果只包含英文类别名，不包含分数。panns stage 已不在默认链路中，需 `--only-tags panns` 或 `--only-tags sound_field_scene.sound` 显式选择才会产出；否则为 `null`。 |
 | `sound_field_scene.external_noise_type` | string array | DASS AudioSet-2M | 检出的 docs/DASS.md 噪音类别键数组：`music`、`animal`、`mechanical`、`nature`、`formless`、`channel_environment`（人类声音与未归类标签永不公开）。类别由全量 527 类向量中未被排除且达到默认阈值 `0.25`（2026-08-24 在 phase2 上校准：DASS-medium 真实噪声类分数偏软 0.1–0.45，干净语音低于 0.15）的标签归组而来，按各类别最高分降序排列；具体标签见 `noise_composition`。 |
-| `sound_field_scene.noise_composition` | object | DASS AudioSet-2M + FireRed AED 门控 | 按 docs/DASS.md 类别归组的背景声组成，展开 `external_noise_type` 每个类别的具体标签。固定含 `music`、`animal`、`mechanical`、`nature`、`formless`、`channel_environment` 六个键，每键为按分数降序的标签名数组；每类最多 `--dass-composition-top-k`（默认 3）个，入组阈值 `--dass-composition-threshold`（默认 `0.30`，与外层 0.25 阈值相互独立）。音乐类别以 FireRed AED 为准：`music_present` 为 `false` 时为空数组，为 `true` 或 AED 未运行（`null`）时输出 DASS 音乐类标签；人类声音与未归类标签只进内部 evidence。成功无检出时各键为空数组，工具失败时整个字段为 `null`。 |
+| `sound_field_scene.noise_composition` | object | DASS AudioSet-2M + FireRed AED 门控 | 按 docs/DASS.md 类别归组的背景声组成，展开 `external_noise_type` 每个类别的具体标签。固定含 `music`、`animal`、`mechanical`、`nature`、`formless`、`channel_environment` 六个键，每键为按分数降序的标签名数组；每类最多 `--dass-composition-top-k`（默认 3）个，入组阈值 `--dass-composition-threshold`（默认 `0.25`，2026-08-25 起与类别阈值对齐——此前 0.30 会在 0.25–0.30 分数段产生「有类别、无组成」的空档）。音乐类别以 FireRed AED 为准：`music_present` 为 `false` 时为空数组，为 `true` 或 AED 未运行（`null`）时输出 DASS 音乐类标签；人类声音与未归类标签只进内部 evidence。成功无检出时各键为空数组，工具失败时整个字段为 `null`。 |
 
-PANNs 的默认阈值是 `0.30`。音频被切成互不重叠的 10 秒分块，最后一个
-分块不足 10 秒时补零。每个 AudioSet 类别取所有分块中的最大概率，然后
-输出达到阈值的前 10 个背景声类别。主语音、静音、室内/室外场景标签、
-混响和回声被排除；音乐、歌唱、人群声、动物、自然声、车辆、机械和噪声等
-类别可以进入结果。PANNs 已退出默认链路，需要时显式选择 panns stage。
+`sound_field_scene.sound` 与 panns stage 已于 2026-08-25 废弃删除
+（`noise_composition` 取代其功能）。PANNs 工具模块保留供后续交叉验证
+evidence 使用，但不注册、不可选择、不进入公开输出。
 
 DASS 的默认阈值是 `0.25`，按互不重叠分块（上游 extractor 固化的 10.24
 秒窗口）取每类最大概率。`external_noise_type` 输出的是 docs/DASS.md 的
@@ -184,7 +180,8 @@ DASS-medium 对真实噪声类输出的 sigmoid 分数普遍偏软（0.1–0.45�
 
 `noise_composition` 把 `external_noise_type` 的每个类别展开为具体标签：
 它对全量 527 维 sigmoid 向量按 docs/DASS.md 的 7 类能力划分归组（不受
-排除策略影响），每类取分数最高的前 3 个且不低于 0.3 的标签。音乐类以
+排除策略影响），每类取分数最高的前 3 个且不低于 0.25 的标签（与
+`external_noise_type` 的类别阈值对齐，保证有类别的行组成非空）。音乐类以
 FireRed AED 的 `music_present` 门控——AED 判定无音乐时音乐桶为空数组，
 即使 DASS 有音乐类高分标签；AED 未运行时不做门控。人类声音类别和
 未归类标签只保留在内部 evidence 的 `category_events` 中，不进入公开
@@ -240,7 +237,6 @@ transcript，不读取音频。
 | FireRed VAD / AED | 16 kHz、单通道、16-bit PCM WAV | VAD 只在没有可用 metadata speech segments 时运行；AED 不满足要求时使用 FFmpeg 生成临时 WAV，推理后删除。 |
 | Brouhaha | 16 kHz、单通道 | pyannote 在内存中对多通道取均值并重采样。 |
 | DNSMOS | 16 kHz、单通道 | 多通道取均值，使用 librosa 重采样。 |
-| PANNs Cnn14 | 32 kHz、单通道 | `librosa.load(..., sr=32000, mono=True)`。 |
 | Rec-RIR | 16 kHz、单通道 | torchaudio 对多通道取均值并重采样，临时 WAV 推理后删除。 |
 | Speaker v2 | 各模型适配器要求的单通道采样率 | MOSS、Sortformer、Pyannote、ECAPA、FireRed VAD 和 Brouhaha 分别在适配器内完成解码、降混与重采样，再按 profile 融合 claim。 |
 | 确定性语言内容 | 原始 transcript | 不做音频预处理；直接对输入文本 tokenize 和统计。 |
@@ -288,7 +284,6 @@ warning 或推理证据。
   "sound_field_scene": {
     "speech_music_events": ["singing", "music"],
     "music_present": true,
-    "sound": ["Music"],
     "external_noise_type": ["music"],
     "noise_composition": {
       "music": ["Background music"],
@@ -330,13 +325,14 @@ warning 或推理证据。
 {
   "speech_music_events": ["speech"],
   "music_present": false,
-  "sound": []
+  "external_noise_type": []
 }
 ```
 
 工具未部署、音频无法读取、推理失败或结果校验失败时，对应字段输出
-`null`。不同模型相互隔离，例如 PANNs 失败只会使 `sound` 为 `null`，不会
-清空 FireRed 的 `speech_music_events` 和 `music_present`。
+`null`。不同模型相互隔离，例如 DASS 失败只会使 `external_noise_type` 和
+`noise_composition` 为 `null`，不会清空 FireRed 的 `speech_music_events`
+和 `music_present`。
 
 ## 6. 当前预留字段
 

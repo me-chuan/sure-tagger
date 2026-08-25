@@ -327,9 +327,8 @@ function getCardsForGroup(sample, group) {
     return [
       card("speech_music_events", listValue(scene.speech_music_events), "FireRed AED 检出类别（speech/singing/music 固定顺序）", !scene.speech_music_events?.length),
       card("music_present", scene.music_present ?? "未生成", "AED 是否检出音乐；同时门控 noise_composition 的音乐桶", scene.music_present == null),
-      card("sound", listValue(scene.sound), "PANNs 背景声（不在默认链路）", !scene.sound?.length),
       card("external_noise_type", formatNoiseTypes(scene.external_noise_type || []), "DASS 噪音类别键（docs/DASS.md ②–⑦；未被排除且 ≥0.25 的标签所归类别，人类/未归类不公开）", !scene.external_noise_type?.length),
-      card("noise_composition", formatComposition(scene.noise_composition), "展开 external_noise_type 各类别的具体标签；每类 top-3 ≥ 0.3，音乐以 FireRed AED 门控", scene.noise_composition == null),
+      card("noise_composition", formatComposition(scene.noise_composition), "展开 external_noise_type 各类别的具体标签；每类 top-3 ≥ 0.25（与类别阈值对齐），音乐以 FireRed AED 门控", scene.noise_composition == null),
     ];
   }
 

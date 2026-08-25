@@ -36,7 +36,6 @@ from tagger.tools.room_acoustic.registry import (
 from tagger.tools.sound_field_scene.registry import (
     DASS_NOISE_TYPE_TOOL,
     FIRERED_AED_TOOL,
-    PANNS_BACKGROUND_TOOL,
 )
 from tagger.tools.sound_field_scene.dass_categories import (
     NOISE_COMPOSITION_AUDIT_MAX_ITEMS,
@@ -49,10 +48,6 @@ from tagger.tools.sound_field_scene.dass_noise_type_detector import (
 from tagger.tools.sound_field_scene.firered_aed_detector import (
     EVENT_NAMES,
     FireRedAedConfig,
-)
-from tagger.tools.sound_field_scene.panns_background_detector import (
-    TOP_EVENTS_LIMIT,
-    PannsBackgroundConfig,
 )
 from tagger.tools.room_acoustic.rir_estimator import (
     RecRirConfig,
@@ -100,7 +95,6 @@ ROOM_ACOUSTIC_FIELDS = {
 SOUND_FIELD_SCENE_FIELDS = {
     "speech_music_events": None,
     "music_present": None,
-    "sound": None,
     "external_noise_type": None,
     "noise_composition": None,
 }
@@ -131,14 +125,15 @@ STAGE_SPEAKER = "speaker"
 STAGE_BROUHAHA = "brouhaha"
 STAGE_DNSMOS = "dnsmos"
 STAGE_FIRERED_AED = "firered_aed"
-STAGE_PANNS = "panns"
 STAGE_DASS = "dass"
 STAGE_RECRIR = "recrir"
 STAGE_FIRERED_LID = "firered_lid"
 
-# PANNs is not part of the default full pipeline (DASS is the primary
-# background-noise source). The stage stays registered so it can still be
-# selected explicitly with --only-tags panns or sound_field_scene.sound.
+# Deprecated on 2026-08-25: the PANNs stage and its public
+# ``sound_field_scene.sound`` field were removed — noise_composition
+# supersedes them. The panns_background_detector module stays importable for
+# future cross-validation evidence work, but nothing runs it and its output
+# must not enter public tags.
 FULL_STAGES = [
     STAGE_LANGUAGE_DETERMINISTIC,
     STAGE_TOPIC,
@@ -161,7 +156,6 @@ AUDIO_STAGES = set(
         STAGE_BROUHAHA,
         STAGE_DNSMOS,
         STAGE_FIRERED_AED,
-        STAGE_PANNS,
         STAGE_DASS,
         STAGE_RECRIR,
         STAGE_FIRERED_LID,
@@ -204,7 +198,6 @@ STAGE_TAG_PATHS = {
         "sound_field_scene.speech_music_events",
         "sound_field_scene.music_present",
     ],
-    STAGE_PANNS: ["sound_field_scene.sound"],
     STAGE_DASS: [
         "sound_field_scene.external_noise_type",
         "sound_field_scene.noise_composition",
@@ -229,7 +222,6 @@ def run_manifest(
     artifact_dir=None,
     dnsmos_config=None,
     firered_aed_config=None,
-    panns_config=None,
     dass_config=None,
     topic_config=None,
     topic_client=None,
@@ -239,7 +231,7 @@ def run_manifest(
     selected_tag_paths=None,
     missing_only=False,
 ):
-    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Optional[Union[str, Path]], Optional[DnsmosConfig], Optional[FireRedAedConfig], Optional[PannsBackgroundConfig], Optional[DassNoiseTypeConfig], Optional[TopicConfig], Any, Optional[FireRedLidConfig], Optional[List[str]], Optional[Union[str, Path]], Optional[List[str]], bool) -> Dict[str, Any]
+    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Optional[Union[str, Path]], Optional[DnsmosConfig], Optional[FireRedAedConfig], Optional[DassNoiseTypeConfig], Optional[TopicConfig], Any, Optional[FireRedLidConfig], Optional[List[str]], Optional[Union[str, Path]], Optional[List[str]], bool) -> Dict[str, Any]
     manifest = Path(manifest_path)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -295,7 +287,6 @@ def run_manifest(
                         tool_context=tool_context,
                         dnsmos_config=dnsmos_config,
                         firered_aed_config=firered_aed_config,
-                        panns_config=panns_config,
                         dass_config=dass_config,
                         topic_config=topic_config,
                         topic_client=topic_client,
@@ -338,8 +329,6 @@ def tag_record(
     dnsmos_client=None,
     firered_aed_config=None,
     firered_aed_client=None,
-    panns_config=None,
-    panns_client=None,
     dass_config=None,
     dass_client=None,
     topic_config=None,
@@ -348,7 +337,7 @@ def tag_record(
     initial_tags=None,
     selected_tag_paths=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Any, Optional[Union[str, Path]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[PannsBackgroundConfig], Any, Optional[DassNoiseTypeConfig], Any, Optional[TopicConfig], Any, Optional[FireRedLidConfig], Optional[Dict[str, Any]], Optional[List[str]]) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Any, Optional[Union[str, Path]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[DassNoiseTypeConfig], Any, Optional[TopicConfig], Any, Optional[FireRedLidConfig], Optional[Dict[str, Any]], Optional[List[str]]) -> Dict[str, Any]
     return _tag_record_internal(
         record,
         manifest_dir,
@@ -362,8 +351,6 @@ def tag_record(
         dnsmos_client=dnsmos_client,
         firered_aed_config=firered_aed_config,
         firered_aed_client=firered_aed_client,
-        panns_config=panns_config,
-        panns_client=panns_client,
         dass_config=dass_config,
         dass_client=dass_client,
         topic_config=topic_config,
@@ -389,8 +376,6 @@ def _tag_record_internal(
     dnsmos_client=None,
     firered_aed_config=None,
     firered_aed_client=None,
-    panns_config=None,
-    panns_client=None,
     dass_config=None,
     dass_client=None,
     topic_config=None,
@@ -399,7 +384,7 @@ def _tag_record_internal(
     initial_tags=None,
     selected_tag_paths=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[PannsBackgroundConfig], Any, Optional[DassNoiseTypeConfig], Any, Optional[TopicConfig], Any, Optional[FireRedLidConfig], Optional[Dict[str, Any]], Optional[List[str]]) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[DassNoiseTypeConfig], Any, Optional[TopicConfig], Any, Optional[FireRedLidConfig], Optional[Dict[str, Any]], Optional[List[str]]) -> Dict[str, Any]
     validate_input_record(record)
     sample = record["sample"]
     sample_id = sample["sample_id"]
@@ -510,17 +495,6 @@ def _tag_record_internal(
                 sample_id,
                 firered_aed_config=firered_aed_config,
                 firered_aed_client=firered_aed_client,
-            )
-        if STAGE_PANNS in stages:
-            _run_panns_background_tool(
-                audio_path,
-                tool_context,
-                tags,
-                internal_results,
-                warnings,
-                sample_id,
-                panns_config=panns_config,
-                panns_client=panns_client,
             )
         if STAGE_DASS in stages:
             _run_dass_noise_type_tool(
@@ -1264,37 +1238,6 @@ def _run_firered_aed_tool(
         _null_firered_aed_tags(tags)
 
 
-def _run_panns_background_tool(
-    audio_path,
-    tool_context,
-    tags,
-    internal_results,
-    warnings,
-    sample_id,
-    panns_config=None,
-    panns_client=None,
-):
-    try:
-        result = PANNS_BACKGROUND_TOOL["run"](
-            audio_path,
-            context=tool_context,
-            config=panns_config,
-            client=panns_client,
-        )
-        apply_result(tags, internal_results, result)
-    except Exception as exc:  # noqa: BLE001 - no non-PANNs fallback is allowed.
-        warnings.append(
-            {
-                "type": "panns_background_error",
-                "message": str(exc),
-                "sample_id": sample_id,
-                "audio_path": str(audio_path),
-                "tool_name": PANNS_BACKGROUND_TOOL["tool_name"],
-            }
-        )
-        _null_panns_background_tag(tags)
-
-
 def _run_dass_noise_type_tool(
     audio_path,
     tool_context,
@@ -1429,10 +1372,6 @@ def _null_dnsmos_tags(tags):
 def _null_firered_aed_tags(tags):
     tags["sound_field_scene"]["speech_music_events"] = None
     tags["sound_field_scene"]["music_present"] = None
-
-
-def _null_panns_background_tag(tags):
-    tags["sound_field_scene"]["sound"] = None
 
 
 def _null_dass_tags(tags):
@@ -1603,7 +1542,7 @@ def compare_native_metadata_sound_field_scene_fields(sample, observed_sound_fiel
     comparisons = [
         ("audio_events", "speech_music_events", None),
         ("music", "music_present", None),
-        ("sound", "sound", None),
+        # ("sound", "sound", None) removed with the PANNs stage (2026-08-25).
         ("external_noise_type", "external_noise_type", None),
     ]
     for native_key, observed_key, tolerance in comparisons:
@@ -1792,15 +1731,16 @@ def audit_sound_field_scene(sound_field_scene):
             }
         )
 
-    sound = sound_field_scene.get("sound")
-    if sound is not None and not _is_valid_label_list(
-        sound,
-        max_items=TOP_EVENTS_LIMIT,
-    ):
-        sound_field_scene["sound"] = None
-        warnings.append(
-            {"type": "invalid_sound_field_scene_value", "field": "sound"}
-        )
+    if "sound" in sound_field_scene:
+        # Deprecated on 2026-08-25: the PANNs stage and its public field
+        # were removed (noise_composition supersedes them). A non-null value
+        # can only come from stale input, so it is dropped (with a warning);
+        # the key is deleted so the deprecated field never reaches output.
+        if sound_field_scene["sound"] is not None:
+            warnings.append(
+                {"type": "deprecated_sound_field_scene_value", "field": "sound"}
+            )
+        del sound_field_scene["sound"]
 
     external_noise_type = sound_field_scene.get("external_noise_type")
     if external_noise_type is not None and not _is_valid_label_list(
@@ -2085,17 +2025,6 @@ def build_arg_parser():
         help="Use GPU in FireRed AED config. Defaults to CPU.",
     )
     parser.add_argument(
-        "--panns-use-gpu",
-        action="store_true",
-        help="Use GPU for PANNs background-sound inference. Defaults to CPU.",
-    )
-    parser.add_argument(
-        "--panns-threshold",
-        type=float,
-        default=0.30,
-        help="PANNs background-sound probability threshold. Defaults to 0.30.",
-    )
-    parser.add_argument(
         "--brouhaha-use-gpu",
         action="store_true",
         help="Use GPU in Brouhaha config. Defaults to CPU when supported.",
@@ -2114,11 +2043,6 @@ def build_arg_parser():
         "--firered-aed-python",
         default=None,
         help="Python executable for FireRed AED subprocess. Defaults to local_config.py.",
-    )
-    parser.add_argument(
-        "--panns-python",
-        default=None,
-        help="Python executable for PANNs subprocess. Defaults to local_config.py.",
     )
     parser.add_argument(
         "--dass-use-gpu",
@@ -2151,10 +2075,11 @@ def build_arg_parser():
     parser.add_argument(
         "--dass-composition-threshold",
         type=float,
-        default=0.3,
+        default=0.25,
         help=(
             "DASS noise-composition per-category probability threshold. "
-            "Defaults to 0.3."
+            "Defaults to 0.25, aligned with --dass-threshold so every "
+            "present category has a non-empty composition bucket."
         ),
     )
     parser.add_argument(
@@ -2313,11 +2238,6 @@ def main(argv=None):
         use_gpu=args.firered_aed_use_gpu,
         subprocess_python=args.firered_aed_python,
     )
-    panns_config = PannsBackgroundConfig(
-        use_gpu=args.panns_use_gpu,
-        threshold=args.panns_threshold,
-        subprocess_python=args.panns_python,
-    )
     dass_config = DassNoiseTypeConfig(
         use_gpu=args.dass_use_gpu,
         threshold=args.dass_threshold,
@@ -2375,7 +2295,6 @@ def main(argv=None):
         artifact_dir=args.artifact_dir,
         dnsmos_config=dnsmos_config,
         firered_aed_config=firered_aed_config,
-        panns_config=panns_config,
         dass_config=dass_config,
         topic_config=topic_config,
         firered_lid_config=firered_lid_config,

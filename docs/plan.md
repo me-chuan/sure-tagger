@@ -17,7 +17,7 @@ room_acoustic.c50_db	annotation[].room_acoustic.c50	Rec-RIR；Brouhaha C50 可�
 声学环境		
 sound_field_scene.speech_music_events（三个）	annotation[].task_extension.sound_event	FireRedVAD-AED	⚠️ AED 已实现（speech_music_events/music_present）；DASS 辅助验证未实现
 sound_field_scene.music_present是否有背景音乐	annotation[].others.music_state	FireRedVAD-AED；DASS 可辅助验证	⚠️ 同上
-sound_field_scene.external_noise_type背景噪音	annotation[].sweeper_scene.external_noise_info.type	DASS-Small 50.1（主） / CED-Small（备） / PANNs（baseline）	✅ 已实现（2026-08-23，dass stage）：复用 sure-harness 已部署的 DASS medium AudioSet-2M 48.9（saurabhati/DASS_medium_AudioSet_48.9），checkpoint 复制到 models/DASS，venv 复用 harness 的 .venv。2026-08-23 起 DASS 为默认链路背景噪音主模型（panns 退出默认链路，仅 --only-tags panns 可选）；默认排除主语音、Silence、声学场景、混响、回声，--no-exclusion 关闭全部排除以便观察原始类别分布。2026-08-24 起同时产出 sound_field_scene.noise_composition（全量 527 类按 docs/DASS.md 归组，每类 top-3 ≥0.3，音乐类别以 FireRed AED music_present 门控；人类/未归类与各类别分数只进内部 evidence category_events，⑦ 类别留作 far_field/混响补充证据）；同日 external_noise_type 默认阈值 0.5→0.25（phase2 校准：真实噪声类分数偏软 0.1–0.45，干净语音 <0.15），并把 external_noise_type 改为输出 DASS.md 类别键（未被排除且 ≥0.25 的标签所归类别，按类内最高分降序，人类/未归类永不公开），具体标签由 noise_composition 展开。CED 未接入。注：计划写的是 DASS-Small 50.1，实际部署的是 medium 48.9，同为 DASS 系列
+sound_field_scene.external_noise_type背景噪音	annotation[].sweeper_scene.external_noise_info.type	DASS-Small 50.1（主） / CED-Small（备） / PANNs（baseline）	✅ 已实现（2026-08-23，dass stage）：复用 sure-harness 已部署的 DASS medium AudioSet-2M 48.9（saurabhati/DASS_medium_AudioSet_48.9），checkpoint 复制到 models/DASS，venv 复用 harness 的 .venv。2026-08-23 起 DASS 为默认链路背景噪音主模型（panns 于 2026-08-25 废弃删除，PANNs 工具模块保留仅作交叉验证 evidence）；默认排除主语音、Silence、声学场景、混响、回声，--no-exclusion 关闭全部排除以便观察原始类别分布。2026-08-24 起同时产出 sound_field_scene.noise_composition（全量 527 类按 docs/DASS.md 归组，每类 top-3 ≥0.3，音乐类别以 FireRed AED music_present 门控；人类/未归类与各类别分数只进内部 evidence category_events，⑦ 类别留作 far_field/混响补充证据）；同日 external_noise_type 默认阈值 0.5→0.25（phase2 校准：真实噪声类分数偏软 0.1–0.45，干净语音 <0.15），并把 external_noise_type 改为输出 DASS.md 类别键（未被排除且 ≥0.25 的标签所归类别，按类内最高分降序，人类/未归类永不公开），具体标签由 noise_composition 展开。CED 未接入。注：计划写的是 DASS-Small 50.1，实际部署的是 medium 48.9，同为 DASS 系列
 sound_field_scene.acoustic_scene 声学环境	annotation[].sweeper_scene.acoustic_scene 	DCASE ASC：WestAI DCASE24（主） / CNN14 DCASE-2020（备）	❌ 未实现，无 stage、无输出字段
 多说话人		
 speaker.multi_speaker	annotation[].speaker.multi_speaker	pyannote Community-1（主） / MOSS-Diarize / Sortformer	⚠️ 三模型均已接入 speaker_v2；但 quality-shadow profile 中 speaker_count/multi_speaker 主源为 Sortformer（pyannote 被排除），与计划"pyannote 为主"不一致，需确认
@@ -43,8 +43,9 @@ language_deterministic / topic / audio_probe / silence / speaker /
 brouhaha / dnsmos / firered_aed / dass / recrir / firered_lid
 ```
 
-`panns` 已退出默认链路（DASS 为背景噪音主模型），仍可
-`--only-tags panns` 显式选择；`sound_field_scene.sound` 保留为可选字段。
+`panns` stage 与 `sound_field_scene.sound` 字段已于 2026-08-25 废弃删除
+（DASS 为背景噪音主模型，具体标签由 `noise_composition` 展开）；PANNs
+工具模块保留，仅作后续交叉验证 evidence 用，不注册、不进入公开输出。
 
 输出为内部 schema（`basic_acoustic.*`、`audio_quality.*`、`room_acoustic.*`、
 `sound_field_scene.*`、`speaker.*`、`language_content.*`）的 tags-only JSONL，

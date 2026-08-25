@@ -3,7 +3,7 @@ window.DEMO_DATA = {
     "sampleCount": 40,
     "datasetCount": 8,
     "selectedCount": 40,
-    "rirArtifactCount": 40,
+    "rirArtifactCount": 25,
     "datasets": [
       {
         "name": "LibriSpeech",
@@ -122,7 +122,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech",
             "singing"
@@ -202,7 +201,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -281,7 +279,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -301,7 +298,7 @@ window.DEMO_DATA = {
       "sampleId": "1089-134686-0003",
       "dataset": "LibriSpeech",
       "title": "LibriSpeech 干净朗读语音",
-      "note": "说话人: 1",
+      "note": "说话人: 1 · 组成: 无明确声源",
       "audio": "assets/audio/librispeech_1089-134686-0003.wav",
       "transcript": "HELLO BERTIE ANY GOOD IN YOUR MIND",
       "nativeMetadata": {},
@@ -355,12 +352,13 @@ window.DEMO_DATA = {
           "noise_composition": {
             "animal": [],
             "channel_environment": [],
-            "formless": [],
+            "formless": [
+              "Silence"
+            ],
             "mechanical": [],
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -443,7 +441,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -524,7 +521,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -605,7 +601,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -625,7 +620,7 @@ window.DEMO_DATA = {
       "sampleId": "BAC009S0764W0123",
       "dataset": "AISHELL-1",
       "title": "AISHELL-1 中文朗读语音",
-      "note": "说话人: 1",
+      "note": "说话人: 1 · 组成: 无明确声源",
       "audio": "assets/audio/aishell_BAC009S0764W0123.wav",
       "transcript": "但 因为 聚集 了 过多 公共 资源",
       "nativeMetadata": {},
@@ -679,12 +674,13 @@ window.DEMO_DATA = {
           "noise_composition": {
             "animal": [],
             "channel_environment": [],
-            "formless": [],
+            "formless": [
+              "Silence"
+            ],
             "mechanical": [],
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -763,7 +759,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -783,7 +778,7 @@ window.DEMO_DATA = {
       "sampleId": "BAC009S0764W0125",
       "dataset": "AISHELL-1",
       "title": "AISHELL-1 中文朗读语音",
-      "note": "说话人: 1",
+      "note": "说话人: 1 · 组成: 无明确声源",
       "audio": "assets/audio/aishell_BAC009S0764W0125.wav",
       "transcript": "标杆 房企 必然 调整 市场 战略",
       "nativeMetadata": {},
@@ -837,12 +832,13 @@ window.DEMO_DATA = {
           "noise_composition": {
             "animal": [],
             "channel_environment": [],
-            "formless": [],
+            "formless": [
+              "Silence"
+            ],
             "mechanical": [],
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -917,7 +913,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -996,7 +991,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -1071,7 +1065,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -1091,7 +1084,7 @@ window.DEMO_DATA = {
       "sampleId": "sx133",
       "dataset": "TIMIT",
       "title": "TIMIT 多音素朗读",
-      "note": "说话人: 1",
+      "note": "说话人: 1 · 组成: 无明确声源",
       "audio": "assets/audio/timit_sx133.wav",
       "transcript": "Pizzerias are convenient for a quick lunch.",
       "nativeMetadata": {},
@@ -1141,12 +1134,13 @@ window.DEMO_DATA = {
           "noise_composition": {
             "animal": [],
             "channel_environment": [],
-            "formless": [],
+            "formless": [
+              "Silence"
+            ],
             "mechanical": [],
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -1166,7 +1160,7 @@ window.DEMO_DATA = {
       "sampleId": "sx223",
       "dataset": "TIMIT",
       "title": "TIMIT 多音素朗读",
-      "note": "说话人: 1",
+      "note": "说话人: 1 · 组成: 无明确声源",
       "audio": "assets/audio/timit_sx223.wav",
       "transcript": "Put the butcher block table in the garage.",
       "nativeMetadata": {},
@@ -1216,12 +1210,13 @@ window.DEMO_DATA = {
           "noise_composition": {
             "animal": [],
             "channel_environment": [],
-            "formless": [],
+            "formless": [
+              "Silence"
+            ],
             "mechanical": [],
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -1296,7 +1291,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -1316,7 +1310,7 @@ window.DEMO_DATA = {
       "sampleId": "F01_050C0102_CAF_REAL",
       "dataset": "CHiME4",
       "title": "CHiME4 咖啡馆噪声语音",
-      "note": "噪声: 机械 · 说话人: 1",
+      "note": "噪声: 机械 · 说话人: 1 · 组成: 机械",
       "audio": "assets/audio/chime4_F01_050C0102_CAF_REAL.wav",
       "transcript": "THE DEPARTMENT SAID THE DECLINE IN FACTORY JOBS WAS CONCENTRATED IN MOTOR VEHICLES AND ELECTRICAL AND ELECTRONIC EQUIPMENT",
       "nativeMetadata": {},
@@ -1364,11 +1358,12 @@ window.DEMO_DATA = {
             "animal": [],
             "channel_environment": [],
             "formless": [],
-            "mechanical": [],
+            "mechanical": [
+              "Chink, clink"
+            ],
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -1447,7 +1442,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -1526,7 +1520,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -1601,7 +1594,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -1700,7 +1692,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -1811,7 +1802,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -1908,7 +1898,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -2005,7 +1994,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -2132,7 +2120,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech"
           ]
@@ -2202,7 +2189,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": []
         },
         "speaker": {
@@ -2264,7 +2250,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": []
         },
         "speaker": {
@@ -2326,12 +2311,12 @@ window.DEMO_DATA = {
             "formless": [],
             "mechanical": [
               "Subway, metro, underground",
-              "Train"
+              "Train",
+              "Vehicle"
             ],
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech",
             "singing",
@@ -2397,7 +2382,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": []
         },
         "speaker": {
@@ -2415,7 +2399,7 @@ window.DEMO_DATA = {
       "sampleId": "street_traffic-barcelona-161-4901-a",
       "dataset": "TUT Urban Acoustic Scenes 2018",
       "title": "TUT 2018 街道交通声景",
-      "note": "噪声: 机械 · 说话人: 0",
+      "note": "噪声: 机械 · 说话人: 0 · 组成: 机械",
       "audio": "assets/audio/tut2018_street_traffic-barcelona-161-4901-a.wav",
       "transcript": "",
       "nativeMetadata": {},
@@ -2457,11 +2441,12 @@ window.DEMO_DATA = {
             "animal": [],
             "channel_environment": [],
             "formless": [],
-            "mechanical": [],
+            "mechanical": [
+              "Vehicle"
+            ],
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": []
         },
         "speaker": {
@@ -2523,7 +2508,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech",
             "singing",
@@ -2589,7 +2573,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": []
         },
         "speaker": {
@@ -2655,7 +2638,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "music"
           ]
@@ -2723,7 +2705,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": []
         },
         "speaker": {
@@ -2789,7 +2770,6 @@ window.DEMO_DATA = {
             "music": [],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": []
         },
         "speaker": {
@@ -2855,7 +2835,6 @@ window.DEMO_DATA = {
             ],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech",
             "singing",
@@ -2925,7 +2904,6 @@ window.DEMO_DATA = {
             ],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "singing",
             "music"
@@ -2994,7 +2972,6 @@ window.DEMO_DATA = {
             ],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "singing",
             "music"
@@ -3063,7 +3040,6 @@ window.DEMO_DATA = {
             ],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech",
             "singing",
@@ -3133,7 +3109,6 @@ window.DEMO_DATA = {
             ],
             "nature": []
           },
-          "sound": null,
           "speech_music_events": [
             "speech",
             "singing",

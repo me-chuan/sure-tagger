@@ -49,7 +49,12 @@ METHOD = "DASS medium AudioSet-2M audio tagging (mAP 48.9)"
 # below 0.15. 0.25 recovers real noise labels without false positives on
 # clean speech; pass --dass-threshold to override.
 DEFAULT_THRESHOLD = 0.25
-COMPOSITION_DEFAULT_THRESHOLD = 0.3
+# Aligned with DEFAULT_THRESHOLD (2026-08-25): both knobs were calibrated on
+# the phase2 sample set (0.25 for categories, 0.30 for composition), but the
+# gap produced "category present, composition empty" rows (e.g. CHiME4/TUT
+# mechanical labels in the 0.25-0.30 band). A single default guarantees every
+# present category has a non-empty composition bucket.
+COMPOSITION_DEFAULT_THRESHOLD = 0.25
 COMPOSITION_DEFAULT_TOP_K = 3
 SAMPLE_RATE_HZ = 16000
 CLASSES_NUM = 527

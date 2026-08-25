@@ -2,7 +2,6 @@
 
 from tagger.tools.sound_field_scene import dass_noise_type_detector
 from tagger.tools.sound_field_scene import firered_aed_detector
-from tagger.tools.sound_field_scene import panns_background_detector
 
 
 FIRERED_AED_TOOL = {
@@ -11,11 +10,11 @@ FIRERED_AED_TOOL = {
     "run": firered_aed_detector.run,
 }
 
-PANNS_BACKGROUND_TOOL = {
-    "tag_path": "sound_field_scene.sound",
-    "tool_name": panns_background_detector.TOOL_NAME,
-    "run": panns_background_detector.run,
-}
+# Deprecated on 2026-08-25: the PANNs stage and its public
+# ``sound_field_scene.sound`` field were removed (noise_composition
+# supersedes them). ``panns_background_detector`` stays importable for
+# future cross-validation evidence work, but it is not registered and must
+# not enter public output.
 
 DASS_NOISE_TYPE_TOOL = {
     "tag_path": "sound_field_scene.external_noise_type",
@@ -25,6 +24,5 @@ DASS_NOISE_TYPE_TOOL = {
 
 SOUND_FIELD_SCENE_TOOLS = [
     FIRERED_AED_TOOL,
-    PANNS_BACKGROUND_TOOL,
     DASS_NOISE_TYPE_TOOL,
 ]

@@ -144,7 +144,7 @@
 | `room_acoustic.c50_db` | `annotation[].room_acoustic.c50` | 待添加 | Rec-RIR 派生 C50；Brouhaha C50 已降级为内部 evidence（`internal.brouhaha_c50_db`）。 |
 | `sound_field_scene.speech_music_events` | `annotation[].task_extension.sound_event` | 已有-训练集样本 | 写 FireRed AED 事件，如 `speech,singing,music`。 |
 | `sound_field_scene.music_present` | `annotation[].others.music_state` | 已有-测试集样本 | true 写 `是`，false 写 `否`。 |
-| `sound_field_scene.sound` | `annotation[].sweeper_scene.external_noise_info.type` | 已有-测试集样本 | 写 PANNs 最主要背景声类别；多标签可用逗号连接。 |
+| `sound_field_scene.external_noise_type` | `annotation[].sweeper_scene.external_noise_info.type` | 已有-测试集样本 | 写 DASS 检出类别（docs/DASS.md 类别键，多个可逗号连接）；具体标签由 `noise_composition` 展开。 |
 | `speaker.speaker_count` | `annotation[].speaker.speaker_count` | 待添加 | 非负整数，表示当前片段内有效说话人数。 |
 | `speaker.multi_speaker` | `annotation[].speaker.multi_speaker` | 待添加 | boolean；与 `speaker_count >= 2` 保持一致。 |
 | `speaker.speaker_change_count` | `annotation[].speaker.speaker_change_count` | 待添加 | 非负整数，表示当前片段内说话人切换次数。 |
@@ -160,9 +160,9 @@
 
 需要额外注意的合并关系：
 
-- `sound_field_scene.speech_music_events` 和 `sound_field_scene.sound` 都可以在展示层汇总为
-  sound event，但主落点保持上表不变，避免 FireRed AED 事件和 PANNs 背景声混在
-  一个不可追踪字段里。
+- `sound_field_scene.speech_music_events` 和 `sound_field_scene.external_noise_type`
+  都可以在展示层汇总为 sound event，但主落点保持上表不变，避免 FireRed AED
+  事件和 DASS 背景噪音混在一个不可追踪字段里。
 - `audio_quality.snr_db` 可以额外派生
   `annotation[].audio_quality.snr_estimation`，但主数值字段仍是
   `annotation[].audio_quality.snr`。
@@ -222,7 +222,7 @@
 | `room_acoustic.c50_db` | `annotation[].room_acoustic.c50` | 建议扩展字段；注明为 Rec-RIR C50。 |
 | `sound_field_scene.speech_music_events` | `annotation[].task_extension.sound_event` | 复用训练集样本字段。多个事件建议用逗号分隔字符串，或与公司确认是否可扩为数组。 |
 | `sound_field_scene.music_present` | `annotation[].others.music_state` | true 写 `是`，false 写 `否`。 |
-| `sound_field_scene.sound` | `annotation[].sweeper_scene.external_noise_info.type` | 写 PANNs 最主要背景声类别；多标签可用逗号连接。 |
+| `sound_field_scene.external_noise_type` | `annotation[].sweeper_scene.external_noise_info.type` | 写 DASS 检出类别（docs/DASS.md 类别键，多个可逗号连接）；具体标签由 `noise_composition` 展开。 |
 
 ### 6.5 说话人
 
