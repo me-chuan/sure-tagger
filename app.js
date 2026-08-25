@@ -327,9 +327,8 @@ function getCardsForGroup(sample, group) {
     return [
       card("speech_music_events", listValue(scene.speech_music_events), "FireRed AED 检出类别（speech/singing/music 固定顺序）", !scene.speech_music_events?.length),
       card("music_present", scene.music_present ?? "未生成", "AED 是否检出音乐；同时门控 noise_composition 的音乐桶", scene.music_present == null),
-      card("sound", listValue(scene.sound), "PANNs 背景声（不在默认链路）", !scene.sound?.length),
       card("external_noise_type", formatNoiseTypes(scene.external_noise_type || []), "DASS 噪音类别键（docs/DASS.md ②–⑦；未被排除且 ≥0.25 的标签所归类别，人类/未归类不公开）", !scene.external_noise_type?.length),
-      card("noise_composition", formatComposition(scene.noise_composition), "展开 external_noise_type 各类别的具体标签；每类 top-3 ≥ 0.3，音乐以 FireRed AED 门控", scene.noise_composition == null),
+      card("noise_composition", formatComposition(scene.noise_composition), "展开 external_noise_type 各类别的具体标签；每类 top-3 ≥ 0.25（与类别阈值对齐），音乐以 FireRed AED 门控", scene.noise_composition == null),
     ];
   }
 
@@ -580,4 +579,162 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+/* ------------------------------------------------------------------ */
+/* Captioner comparison (caption_pairs_3000, first 20 clips)          */
+/* ------------------------------------------------------------------ */
+
+const captionData = window.CAPTION_COMPARE;
+const captionState = { activeId: null };
+
+function initCaptionCompare() {
+  if (!captionData || !captionData.samples?.length) return;
+  captionState.activeId = captionData.samples[0].sampleId;
+  renderCaptionMetrics();
+  renderCaptionList();
+  renderCaptionSample();
+}
+
+function renderCaptionMetrics() {
+  const s = captionData.summary;
+  const noise = (ours) =>
+    `${s.bothNoise} 两侧均有 / ${s.onlyCaptioner} 仅 captioner / ${s.onlyOurs} 仅 sure-tagger`;
+  const metrics = [
+    ["对比样本", s.sampleCount, "caption_pairs_3000 前 20 条，纯音频仅跑 sound_field 标签"],
+    ["音乐判定一致", `${s.musicAgree}/${s.sampleCount}`, `冲突 ${s.musicConflict} 条，captioner 未提及 ${s.musicUnmentioned} 条`],
+    ["噪音检出对比", `${s.bothNoise + s.onlyOurs}/${s.sampleCount}`, noise()],
+    ["captioner 噪音标签", `${s.onlyCaptioner + s.bothNoise}/${s.sampleCount}`, "qwen-omni 结构化提取的 external_noise_info.type"],
+  ];
+  const grid = document.querySelector("#captionMetrics");
+  if (!grid) return;
+  grid.innerHTML = metrics
+    .map(
+      ([label, value, caption]) => `
+        <article class="metric-card">
+          <p class="metric-label">${label}</p>
+          <div class="metric-value">${value}</div>
+          <p class="metric-caption">${caption}</p>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function renderCaptionList() {
+  const list = document.querySelector("#captionList");
+  const count = document.querySelector("#captionCount");
+  if (!list) return;
+  count.textContent = captionData.samples.length;
+  list.innerHTML = captionData.samples
+    .map(
+      (sample) => `
+        <button type="button" data-sample-id="${escapeAttr(sample.sampleId)}"
+          class="${sample.sampleId === captionState.activeId ? "is-active" : ""}">
+          <span class="sample-id">${escapeHtml(sample.sampleId)}</span>
+        </button>
+      `,
+    )
+    .join("");
+  list.querySelectorAll("button").forEach((button) => {
+    button.addEventListener("click", () => {
+      captionState.activeId = button.dataset.sampleId;
+      renderCaptionList();
+      renderCaptionSample();
+    });
+  });
+}
+
+function getCaptionSample() {
+  return (
+    captionData.samples.find((sample) => sample.sampleId === captionState.activeId) ||
+    captionData.samples[0]
+  );
+}
+
+function renderCaptionSample() {
+  const sample = getCaptionSample();
+  const elsCaption = {
+    title: document.querySelector("#captionSampleTitle"),
+    note: document.querySelector("#captionSampleNote"),
+    id: document.querySelector("#captionSampleId"),
+    audio: document.querySelector("#captionAudio"),
+    grid: document.querySelector("#captionCompareGrid"),
+    text: document.querySelector("#captionText"),
+  };
+  if (!elsCaption.grid) return;
+
+  elsCaption.title.textContent = sample.sampleId;
+  elsCaption.id.textContent = `#${captionData.samples.indexOf(sample) + 1} / ${captionData.samples.length}`;
+  elsCaption.audio.src = sample.audio;
+
+  const ours = sample.ours;
+  const capt = sample.captioner;
+
+  const categoryLabels = sample.ours.categoryLabels || {};
+  const ourNoise = [];
+  for (const category of ours.categories || []) {
+    const labels = (ours.composition && ours.composition[category]) || [];
+    ourNoise.push({
+      key: category,
+      name: categoryLabels[category] || category,
+      labels,
+    });
+  }
+
+  const musicNote = [];
+  musicNote.push(
+    ours.music == null ? "sure-tagger: AED 未运行" : `sure-tagger: AED 判 ${ours.music ? "有音乐" : "无音乐"}`,
+  );
+  musicNote.push(
+    capt.musicState == null ? "captioner: 未提及" : `captioner: ${capt.musicState}`,
+  );
+  elsCaption.note.textContent = musicNote.join(" · ");
+
+  const renderTag = (value) =>
+    value == null || value === ""
+      ? `<span class="caption-tag is-missing">未标注</span>`
+      : `<span class="caption-tag">${escapeHtml(value)}</span>`;
+
+  const listValue = (values) =>
+    !values?.length ? `<span class="caption-tag is-missing">未检出</span>` : values.map((v) => `<span class="caption-tag">${escapeHtml(v)}</span>`).join(" ");
+
+  elsCaption.grid.innerHTML = `
+    <div class="caption-source">
+      <h3>sure-tagger（FireRed AED + DASS）</h3>
+      <dl>
+        <dt>speech / singing / music 事件</dt>
+        <dd>${listValue(ours.events)}</dd>
+        <dt>music_present</dt>
+        <dd>${ours.music == null ? `<span class="caption-tag is-missing">未生成</span>` : `<span class="caption-tag">${ours.music ? "true" : "false"}</span>`}</dd>
+        <dt>external_noise_type</dt>
+        <dd>${listValue(ours.categories)}</dd>
+        <dt>noise_composition</dt>
+        <dd>${
+          ourNoise.length
+            ? ourNoise
+                .map(
+                  (item) =>
+                    `<span class="caption-tag is-category">${escapeHtml(item.name)}</span> ${listValue(item.labels)}`,
+                )
+                .join("<br>")
+            : `<span class="caption-tag is-missing">全部类别为空</span>`
+        }</dd>
+      </dl>
+    </div>
+    <div class="caption-source">
+      <h3>qwen-omni captioner</h3>
+      <dl>
+        <dt>sound_event</dt>
+        <dd>${renderTag(capt.soundEvent)}</dd>
+        <dt>music_state</dt>
+        <dd>${renderTag(capt.musicState)}</dd>
+        <dt>external_noise_info.type</dt>
+        <dd>${listValue(capt.noiseLabels)}</dd>
+      </dl>
+    </div>
+  `;
+
+  elsCaption.text.textContent = capt.caption;
+}
+
 init();
+initCaptionCompare();

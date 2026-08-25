@@ -19,6 +19,7 @@
         <a href="#workflow">流程</a>
         <a href="#samples">样本</a>
         <a href="#coverage">覆盖</a>
+        <a href="#caption-compare">Captioner 对比</a>
       </nav>
     </header>
 
@@ -128,14 +129,65 @@
           </div>
         </div>
       </section>
+
+      <section class="summary-band caption-band" id="caption-compare" aria-labelledby="caption-title">
+        <div class="section-heading">
+          <p class="eyebrow">Cross-check / caption_pairs_3000 前 20 条</p>
+          <h2 id="caption-title">sound_field 标签 vs qwen-omni captioner</h2>
+          <p class="lead">
+            对纯音频只跑 sound_field 类标签（FireRed AED + DASS 分类背景声），与 qwen-omni captioner 提取的结构化标注逐条对比：音乐判定、语音/歌声/音乐事件、背景噪音标签。
+          </p>
+        </div>
+        <div class="metric-grid" id="captionMetrics"></div>
+      </section>
+
+      <section class="workspace" id="caption-workspace" aria-labelledby="caption-samples-title">
+        <aside class="sample-rail">
+          <div class="rail-heading">
+            <div>
+              <p class="eyebrow">caption_pairs_3000</p>
+              <h2 id="caption-samples-title">对比样本</h2>
+            </div>
+            <span class="count-pill" id="captionCount"></span>
+          </div>
+          <div class="sample-list" id="captionList"></div>
+        </aside>
+
+        <section class="sample-detail" aria-live="polite">
+          <div class="detail-header">
+            <div>
+              <p class="eyebrow">caption_pairs_3000 · 前 20 条</p>
+              <h2 id="captionSampleTitle"></h2>
+              <p class="sample-note" id="captionSampleNote"></p>
+            </div>
+            <div class="sample-id" id="captionSampleId"></div>
+          </div>
+
+          <div class="audio-stage">
+            <audio id="captionAudio" controls preload="none"></audio>
+            <div class="waveform-hint">
+              sure-tagger 侧只跑 sound_field 标签（FireRed AED + DASS 分类背景声）；captioner 侧来自 qwen-omni 描述的结构化提取（external_noise_info.type / music_state / sound_event）。
+            </div>
+          </div>
+
+          <div class="caption-compare-grid" id="captionCompareGrid"></div>
+
+          <details class="json-panel">
+            <summary>查看 captioner 完整描述</summary>
+            <div class="caption-text" id="captionText"></div>
+          </details>
+        </section>
+      </section>
     </main>
 
     <footer class="footer">
       <span>Demo data: phase2 full pipeline tags（outputs/phase2_full_tags.jsonl，scripts/build_demo_data.py 生成）</span>
       <span>speaker 为 quality-shadow 多模型融合；无 transcript 噪声样本按 guard 跳过 speech 相关 stage。</span>
+      <span>Captioner 对比：caption_pairs_3000 前 20 条，sound_field 标签 vs qwen-omni captioner（scripts/build_caption_compare.py 生成）。</span>
     </footer>
 
     <script src="data.js"></script>
+    <script src="caption_compare.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
