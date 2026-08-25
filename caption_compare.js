@@ -96,8 +96,7 @@ window.CAPTION_COMPARE = {
       "audio": "assets/caption20/0.000_16.168_obj_107f1090-ebde-475b-95c2-4de8e56056e0.mp3",
       "ours": {
         "events": [
-          "speech",
-          "singing"
+          "speech"
         ],
         "music": false,
         "categories": [],
@@ -173,8 +172,7 @@ window.CAPTION_COMPARE = {
       "audio": "assets/caption20/0.000_23.380_obj_550086c7-68a5-42ac-a032-9fdc96bf05e2.mp3",
       "ours": {
         "events": [
-          "speech",
-          "singing"
+          "speech"
         ],
         "music": false,
         "categories": [],
@@ -285,7 +283,6 @@ window.CAPTION_COMPARE = {
       "ours": {
         "events": [
           "speech",
-          "singing",
           "music"
         ],
         "music": true,
@@ -363,8 +360,7 @@ window.CAPTION_COMPARE = {
       "audio": "assets/caption20/0.000_26.570_obj_78c7fd09-279f-4d9c-a230-0f2442ad0ab3.mp3",
       "ours": {
         "events": [
-          "speech",
-          "singing"
+          "speech"
         ],
         "music": false,
         "categories": [],
