@@ -64,7 +64,7 @@ Speaker metadata、Rec-RIR 等非公开中间结果会写到 `--artifact-dir`。
 | `topic` | `language_content.topic` |
 | `audio_probe` | `basic_acoustic.duration_sec`, `sample_rate_hz`, `channels` |
 | `silence` | `basic_acoustic.silence_segments`, `silence_ratio` |
-| `speaker` | `speaker.speaker_count`, `multi_speaker`, `speaker_change_count`, `speaker_change`, `overlap_ratio`, `speaker_overlap` |
+| `speaker` | `speaker.speaker_count`, `multi_speaker`, `speaker_change_count`, `speaker_change`, `overlap_ratio`, `speaker_overlap`, `profiles` |
 | `brouhaha` | `audio_quality.snr_db`（C50 仅作为内部 evidence `internal.brouhaha_c50_db`） |
 | `dnsmos` | `audio_quality.dnsmos_sig`, `dnsmos_bak`, `dnsmos_ovrl`, `dnsmos_p808` |
 | `firered_aed` | `sound_field_scene.speech_music_events`, `music_present` |
@@ -298,7 +298,7 @@ SpeechBrain ECAPA
 Brouhaha
 ```
 
-公开输出固定为六字段：
+公开输出固定为六字段加 `profiles` 画像数组：
 
 ```text
 speaker.speaker_count
@@ -307,7 +307,14 @@ speaker.speaker_change_count
 speaker.speaker_change
 speaker.overlap_ratio
 speaker.speaker_overlap
+speaker.profiles
 ```
+
+`profiles` 是 2026-08-26 起接入的确定性说话人画像（语速、音高档位、片段内
+相对音量），与六个 claim 使用同一 decision timeline，不引入新模型，失败或
+证据不足时独立为 `null`，不影响六字段。可通过
+`--speaker-profile-disable` 关闭画像计算。profile 计算与 `--speaker-profile`
+选择的模型组合无关。
 
 profile 可通过 CLI 选择：
 
@@ -569,7 +576,7 @@ tags，再运行本次指定的 stage。
 
 ```bash
 --only-tags language_content.topic
---only-tags speaker.speaker_count,speaker.multi_speaker,speaker.speaker_change_count,speaker.speaker_change,speaker.overlap_ratio,speaker.speaker_overlap
+--only-tags speaker.speaker_count,speaker.multi_speaker,speaker.speaker_change_count,speaker.speaker_change,speaker.overlap_ratio,speaker.speaker_overlap,speaker.profiles
 --only-tags basic_acoustic.silence_segments,basic_acoustic.silence_ratio
 ```
 

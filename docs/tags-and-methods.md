@@ -111,7 +111,7 @@ manifest 每行是一个封闭的 raw-only JSON 对象。例如：
 
 ## 3. 当前可打标签
 
-当前 tagging pipeline 定义了 30 个公开字段。`room_acoustic.far_field`
+当前 tagging pipeline 定义了 31 个公开字段。`room_acoustic.far_field`
 仍是预留字段，暂时输出 `null`。`language_content.topic` 已接入可选的
 OpenAI Responses 实现，但默认关闭；未启用、配置缺失或调用失败时输出
 `null`。
@@ -199,6 +199,7 @@ FireRed AED 的 `music_present` 门控——AED 判定无音乐时音乐桶为�
 | `speaker.speaker_change` | boolean | speaker v2 的 change claim；`quality-shadow` 以 MOSS 为主、Sortformer 为 guard/fallback | 是否发生说话人切换。 |
 | `speaker.overlap_ratio` | number / `[0, 1]` | 从 speaker v2 为 overlap claim 选中的 timeline 派生，分母为 speech union duration | 重叠发言时长占有效语音时长的比例。 |
 | `speaker.speaker_overlap` | boolean | speaker v2 的 overlap claim；Pyannote 主判，Sortformer/MOSS 作 witness 或 fallback | 是否存在多人同时发言。 |
+| `speaker.profiles` | array of object / nullable | speaker v2 的确定性画像（2026-08-26 起，复用 decision timeline、MOSS 文本和 VAD，无新模型） | 每个说话人的语言感知语速、相对音高档位和片段内相对音量。每项为 `speaker_id`（`speaker_1`、`speaker_2`…）、`speech_rate`（`band` 取 `slow`/`normal`/`fast`/`variable`、`value`、`unit` 取 `zh_char_per_sec`/`word_per_min`；`unit` 未知时 `value` 为 `null`）、`pitch`（`low`/`mid`/`high`/`variable`，相对 F0 档位，不映射性别）、`speaker_volume`（`low`/`normal`/`loud`/`variable`，仅同片段内相对响度）。语速为首版重点：中文按有效汉字/秒，拉丁语系按词/分钟，重叠区间、静音和无 speech coverage 的区间不参与汇总，累计有效语音不足 3 秒或文本单位不足 8 时该说话人语速为 `null`。无法得到可靠时间轴时为 `null`，确认没有语音时为 `[]`。不推断年龄、性别、情绪或口音；原始 F0/RMS/区间只进内部 artifact。 |
 
 总线直接调用 `tagger/pipelines/speaker_evidence.py`，默认 profile 是
 `quality-shadow`，不再读取 native metadata 生成 speaker 公开值，也不存在旧的
@@ -301,7 +302,8 @@ warning 或推理证据。
     "speaker_change_count": null,
     "speaker_change": null,
     "overlap_ratio": null,
-    "speaker_overlap": null
+    "speaker_overlap": null,
+    "profiles": null
   },
   "language_content": {
     "topic": null,

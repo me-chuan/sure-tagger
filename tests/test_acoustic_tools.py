@@ -314,6 +314,7 @@ class AcousticToolsTest(unittest.TestCase):
                 "speaker_change": False,
                 "overlap_ratio": 0.0,
                 "speaker_overlap": False,
+                "profiles": None,
             }
             topic_client = FakeTopicClient(
                 {
@@ -411,6 +412,18 @@ class AcousticToolsTest(unittest.TestCase):
                 "speaker_change": True,
                 "overlap_ratio": 0.25,
                 "speaker_overlap": True,
+                "profiles": [
+                    {
+                        "speaker_id": "speaker_1",
+                        "speech_rate": {
+                            "band": "normal",
+                            "value": 4.2,
+                            "unit": "zh_char_per_sec",
+                        },
+                        "pitch": "mid",
+                        "speaker_volume": "normal",
+                    }
+                ],
             }
             result = {
                 "speaker": public_speaker,
@@ -2115,6 +2128,7 @@ class AcousticToolsTest(unittest.TestCase):
                 "speaker_change": False,
                 "overlap_ratio": 0.0,
                 "speaker_overlap": False,
+                "profiles": None,
             }
             result = {
                 "speaker": public_speaker,
@@ -2239,6 +2253,118 @@ class AcousticToolsTest(unittest.TestCase):
             ],
         )
         self.assertTrue(all(value is None for value in speaker.values()))
+
+    def test_speaker_auditor_accepts_valid_profiles(self):
+        speaker = {
+            "speaker_count": 2,
+            "multi_speaker": True,
+            "speaker_change_count": 1,
+            "speaker_change": True,
+            "overlap_ratio": 0.125,
+            "speaker_overlap": True,
+            "profiles": [
+                {
+                    "speaker_id": "speaker_1",
+                    "speech_rate": {
+                        "band": "normal",
+                        "value": 4.2,
+                        "unit": "zh_char_per_sec",
+                    },
+                    "pitch": "mid",
+                    "speaker_volume": "normal",
+                },
+                {
+                    "speaker_id": "speaker_2",
+                    "speech_rate": {
+                        "band": "fast",
+                        "value": 165.0,
+                        "unit": "word_per_min",
+                    },
+                    "pitch": "high",
+                    "speaker_volume": "low",
+                },
+                {
+                    "speaker_id": "speaker_3",
+                    "speech_rate": {"band": None, "value": None, "unit": None},
+                    "pitch": None,
+                    "speaker_volume": None,
+                },
+            ],
+        }
+
+        warnings = audit_speaker(speaker)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(len(speaker["profiles"]), 3)
+
+    def test_speaker_auditor_rejects_invalid_profiles(self):
+        valid_profile = {
+            "speaker_id": "speaker_1",
+            "speech_rate": {
+                "band": "normal",
+                "value": 4.2,
+                "unit": "zh_char_per_sec",
+            },
+            "pitch": "mid",
+            "speaker_volume": "normal",
+        }
+        bad_cases = [
+            "not-a-list",
+            [valid_profile, dict(valid_profile)],  # duplicate speaker ids
+            [dict(valid_profile, speaker_id="1")],
+            [
+                dict(
+                    valid_profile,
+                    speech_rate={
+                        "band": "instant",
+                        "value": 4.2,
+                        "unit": "zh_char_per_sec",
+                    },
+                )
+            ],
+            [
+                dict(
+                    valid_profile,
+                    speech_rate={"band": "normal", "value": 4.2, "unit": None},
+                )
+            ],
+            [dict(valid_profile, pitch="tenor")],
+            [dict(valid_profile, speaker_volume="screaming")],
+        ]
+        for value in bad_cases:
+            speaker = {
+                "speaker_count": 1,
+                "multi_speaker": False,
+                "speaker_change_count": 0,
+                "speaker_change": False,
+                "overlap_ratio": 0.0,
+                "speaker_overlap": False,
+                "profiles": value,
+            }
+
+            warnings = audit_speaker(speaker)
+
+            self.assertEqual(
+                warnings,
+                [{"type": "invalid_speaker_value", "field": "profiles"}],
+            )
+            self.assertIsNone(speaker["profiles"])
+
+    def test_speaker_auditor_accepts_empty_profiles_list(self):
+        speaker = {
+            "speaker_count": 0,
+            "multi_speaker": False,
+            "speaker_change_count": 0,
+            "speaker_change": False,
+            "overlap_ratio": 0.0,
+            "speaker_overlap": False,
+            "profiles": [],
+        }
+
+        warnings = audit_speaker(speaker)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(speaker["profiles"], [])
 
 
 def make_record(audio_path):

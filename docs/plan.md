@@ -26,6 +26,7 @@ speaker.speaker_change	annotation[].speaker.speaker_change	pyannote Community-1 
 speaker.speaker_change_count	annotation[].speaker.speaker_change_count	pyannote Community-1 / MOSS-Diarize / Sortformer	⚠️ 同上
 speaker.speaker_overlap	annotation[].speaker.speaker_overlap	pyannote Community-1  / Sortformer/ MOSS-Diarize	✅ 已实现（overlap 主源为 pyannote，与计划一致）
 speaker.overlap_ratio	annotation[].speaker.overlap_ratio	pyannote Community-1  / Sortformer / MOSS-Diarize	✅ 已实现（同上）
+speaker.profiles	（公司 schema 暂无对应；对齐 captioner speakerProfile 的 speed/pitch/speaker_volume）	确定性统计适配器（复用 decision timeline / MOSS 文本 / VAD，无新模型）	✅ 已实现（2026-08-26）：speaker_v2.speaker_profile.v0.1，语速（zh_char_per_sec / word_per_min）、相对音高档位、片段内相对音量；不可靠值为 null，不推断年龄/性别/情绪/口音（属 Phase 3 属性模型闸门）
 语言		
 language_content.topic	annotation[].topic	LLM / 小型文本分类模型	✅ 已实现（OpenAI Responses API，--topic-enable 显式开启）
 language_content.language	annotation[].transcription.language	FireRedLID	✅ 已实现（2026-08-23）：firered_lid stage，模型 models/FireRedASR2S/pretrained_models/FireRedLID，runtime .runtime/fireredlid_py311，支持 100+ 语言与 zh-<region> 方言码；原 Unicode script 启发式保留在 deterministic.py 但不再注册为 language 来源

@@ -107,6 +107,7 @@ SPEAKER_FIELDS = {
     "speaker_change": None,
     "overlap_ratio": None,
     "speaker_overlap": None,
+    "profiles": None,
 }
 
 LANGUAGE_CONTENT_FIELDS = {
@@ -187,6 +188,7 @@ STAGE_TAG_PATHS = {
         "speaker.speaker_change",
         "speaker.overlap_ratio",
         "speaker.speaker_overlap",
+        "speaker.profiles",
     ],
     STAGE_BROUHAHA: ["audio_quality.snr_db"],
     STAGE_DNSMOS: [
@@ -1124,14 +1126,17 @@ def _run_speaker_tools(
         speaker = result.get("speaker")
         if not isinstance(speaker, dict):
             raise ValueError("speaker-v2 result is missing the public speaker object")
-        missing_fields = sorted(set(SPEAKER_FIELDS) - set(speaker))
+        missing_fields = sorted(
+            set(field for field in SPEAKER_FIELDS if field != "profiles")
+            - set(speaker)
+        )
         if missing_fields:
             raise ValueError(
                 "speaker-v2 result is missing fields: %s"
                 % ", ".join(missing_fields)
             )
         for field in SPEAKER_FIELDS:
-            tags["speaker"][field] = speaker[field]
+            tags["speaker"][field] = speaker.get(field)
         internal_results.append(
             ToolResult(
                 tag_path="speaker",
@@ -1181,6 +1186,7 @@ def _set_no_transcript_speaker_tags(tags):
     tags["speaker"]["speaker_change"] = False
     tags["speaker"]["overlap_ratio"] = 0.0
     tags["speaker"]["speaker_overlap"] = False
+    tags["speaker"]["profiles"] = []
 
 
 def _null_language_content_tags(tags):
@@ -1929,6 +1935,45 @@ def _is_valid_label_list(
     return True
 
 
+_SPEAKER_PROFILE_RATE_BANDS = (None, "slow", "normal", "fast", "variable")
+_SPEAKER_PROFILE_RATE_UNITS = (None, "zh_char_per_sec", "word_per_min")
+_SPEAKER_PROFILE_PITCH_VALUES = (None, "low", "mid", "high", "variable")
+_SPEAKER_PROFILE_VOLUME_VALUES = (None, "low", "normal", "loud", "variable")
+
+
+def _is_valid_speaker_profile(item):
+    # Mirrors the speaker-v2 resolver profile normalization rules.
+    if not isinstance(item, dict):
+        return False
+    speaker_id = item.get("speaker_id")
+    if not isinstance(speaker_id, str) or not re.match(
+        r"^speaker_[1-9][0-9]*$", speaker_id
+    ):
+        return False
+    rate = item.get("speech_rate")
+    if not isinstance(rate, dict):
+        return False
+    band = rate.get("band")
+    unit = rate.get("unit")
+    number = rate.get("value")
+    if band not in _SPEAKER_PROFILE_RATE_BANDS:
+        return False
+    if unit not in _SPEAKER_PROFILE_RATE_UNITS:
+        return False
+    if number is not None and (
+        isinstance(number, bool)
+        or not isinstance(number, (int, float))
+        or not _is_finite_number(number)
+        or unit is None
+    ):
+        return False
+    if item.get("pitch") not in _SPEAKER_PROFILE_PITCH_VALUES:
+        return False
+    if item.get("speaker_volume") not in _SPEAKER_PROFILE_VOLUME_VALUES:
+        return False
+    return True
+
+
 def audit_speaker(speaker):
     # type: (Dict[str, Any]) -> List[Dict[str, Any]]
     warnings = []  # type: List[Dict[str, Any]]
@@ -1956,6 +2001,20 @@ def audit_speaker(speaker):
         warnings.append(
             {"type": "invalid_speaker_value", "field": "overlap_ratio"}
         )
+
+    profiles = speaker.get("profiles")
+    if profiles is not None:
+        valid = isinstance(profiles, list) and all(
+            _is_valid_speaker_profile(item) for item in profiles
+        )
+        if valid:
+            profile_ids = [item.get("speaker_id") for item in profiles]
+            valid = len(set(profile_ids)) == len(profile_ids)
+        if not valid:
+            speaker["profiles"] = None
+            warnings.append(
+                {"type": "invalid_speaker_value", "field": "profiles"}
+            )
 
     return warnings
 
