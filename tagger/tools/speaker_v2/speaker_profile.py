@@ -434,6 +434,8 @@ def _acoustic_profile(intervals, audio_path, sample_rate_hz=None):
     ]
     if len(window_db) >= 2 and max(window_db) - min(window_db) >= 6.0:
         result["speaker_volume"] = "variable"
+    else:
+        result["speaker_volume"] = "normal"
     if f0_values and voiced_ratio >= 0.2:
         median = _median(f0_values)
         result["pitch_hz_median"] = round(median, 3)
@@ -441,7 +443,6 @@ def _acoustic_profile(intervals, audio_path, sample_rate_hz=None):
         result["reason"] = None
     else:
         result["reason"] = "insufficient_voiced_frames"
-    result["speaker_volume"] = "normal"
     return result
 
 

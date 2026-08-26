@@ -1,7 +1,11 @@
+import math
+import struct
 import subprocess
 import tempfile
 import unittest
+import wave
 from array import array
+from pathlib import Path
 from unittest import mock
 
 from tagger.tools.speaker_v2.contracts import build_evidence
@@ -38,6 +42,22 @@ def coverage(segments, duration=6.0):
         {"speech_segments": segments},
         quality={"usable": True},
     )
+
+
+def write_sine_wav(path, blocks, rate=16000, frequency=220.0):
+    """Write a mono 16-bit PCM WAV from (seconds, amplitude) sine blocks."""
+    frames = []
+    for seconds, amplitude in blocks:
+        count = int(seconds * rate)
+        frames.extend(
+            int(amplitude * 32767 * math.sin(2.0 * math.pi * frequency * index / rate))
+            for index in range(count)
+        )
+    with wave.open(str(path), "wb") as sink:
+        sink.setnchannels(1)
+        sink.setsampwidth(2)
+        sink.setframerate(rate)
+        sink.writeframes(struct.pack("<%dh" % len(frames), *frames))
 
 
 class SpeakerProfileTest(unittest.TestCase):
@@ -100,6 +120,79 @@ class SpeakerProfileTest(unittest.TestCase):
             coverage([], 6.0),
         )
         self.assertEqual(result["profiles"], [])
+
+    def test_speaker_volume_variable_band_for_large_within_speaker_range(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio = Path(tmpdir) / "variable.wav"
+            write_sine_wav(audio, [(0.5, 0.002), (0.5, 0.008)])
+            result = compute_speaker_profiles(
+                timeline(
+                    [
+                        {
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "speaker_id": "S01",
+                            "text": "",
+                        }
+                    ],
+                    duration=1.0,
+                ),
+                audio_path=str(audio),
+                sample_rate_hz=16000,
+            )
+        self.assertEqual(result["profiles"][0]["speaker_volume"], "variable")
+
+    def test_speaker_volume_normal_band_for_constant_level(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio = Path(tmpdir) / "constant.wav"
+            write_sine_wav(audio, [(1.0, 0.004)])
+            result = compute_speaker_profiles(
+                timeline(
+                    [
+                        {
+                            "start_sec": 0.0,
+                            "end_sec": 1.0,
+                            "speaker_id": "S01",
+                            "text": "",
+                        }
+                    ],
+                    duration=1.0,
+                ),
+                audio_path=str(audio),
+                sample_rate_hz=16000,
+            )
+        self.assertEqual(result["profiles"][0]["speaker_volume"], "normal")
+
+    def test_speaker_volume_relative_bands_compare_within_clip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio = Path(tmpdir) / "relative.wav"
+            write_sine_wav(audio, [(0.8, 0.002), (0.8, 0.008)])
+            result = compute_speaker_profiles(
+                timeline(
+                    [
+                        {
+                            "start_sec": 0.0,
+                            "end_sec": 0.8,
+                            "speaker_id": "S01",
+                            "text": "",
+                        },
+                        {
+                            "start_sec": 0.8,
+                            "end_sec": 1.6,
+                            "speaker_id": "S02",
+                            "text": "",
+                        },
+                    ],
+                    duration=1.6,
+                ),
+                audio_path=str(audio),
+                sample_rate_hz=16000,
+            )
+        volumes = {
+            profile["speaker_id"]: profile["speaker_volume"]
+            for profile in result["profiles"]
+        }
+        self.assertEqual(volumes, {"speaker_1": "low", "speaker_2": "loud"})
 
     def test_mp3_fallback_decodes_mono_float_samples(self):
         decoded = array("f", [0.25]) * 16000
