@@ -66,6 +66,7 @@ from tagger.tools.language_content.registry import (
     FIRERED_LID_LANGUAGE_CONTENT_TOOL,
     TOPIC_LANGUAGE_CONTENT_TOOL,
 )
+from tagger.tools.language_content import deterministic as deterministic_language_content
 from tagger.tools.language_content.firered_lid_detector import FireRedLidConfig
 from tagger.tools.language_content.topic import TopicConfig
 
@@ -394,21 +395,41 @@ def _tag_record_internal(
     internal_results = []  # type: List[Dict[str, Any]]
     warnings = []  # type: List[Dict[str, Any]]
     stages = _stages_for_tag_paths(selected_tag_paths, tags)
-    stages = _apply_no_transcript_speech_stage_guard(sample, tags, stages, warnings)
+    has_input_transcript = _has_transcript(sample)
+    language_content_stages = {
+        STAGE_LANGUAGE_DETERMINISTIC,
+        STAGE_TOPIC,
+        STAGE_FIRERED_LID,
+    }
+    speaker_asr_required = (
+        not has_input_transcript
+        and bool(stages & language_content_stages)
+    )
+    deferred_firered_lid = False
+    if speaker_asr_required:
+        # The speaker stage is the source of the replacement transcript. Delay
+        # the language stages until its audio-derived ASR has completed.
+        stages.add(STAGE_SPEAKER)
+        _add_dependency_stages(stages, tags)
+        deferred_firered_lid = STAGE_FIRERED_LID in stages
+        stages.discard(STAGE_FIRERED_LID)
+    else:
+        stages = _apply_no_transcript_speech_stage_guard(sample, tags, stages, warnings)
 
-    if STAGE_LANGUAGE_DETERMINISTIC in stages or STAGE_TOPIC in stages:
-        _run_language_content_tools(
-            record,
-            tags,
-            internal_results,
-            warnings,
-            sample_id,
-            topic_config=topic_config,
-            topic_client=topic_client,
-            stages=stages,
-        )
+        if STAGE_LANGUAGE_DETERMINISTIC in stages or STAGE_TOPIC in stages:
+            _run_language_content_tools(
+                record,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                topic_config=topic_config,
+                topic_client=topic_client,
+                stages=stages,
+            )
 
     needs_audio = bool(stages & AUDIO_STAGES)
+    speaker_asr_transcript = ""
     if not needs_audio:
         pass
     elif audio_path is None:
@@ -451,7 +472,7 @@ def _tag_record_internal(
                 firered_vad_config=firered_vad_config,
             )
         if STAGE_SPEAKER in stages:
-            _run_speaker_tools(
+            speaker_asr_transcript = _run_speaker_tools(
                 audio_path,
                 record,
                 manifest_dir,
@@ -529,6 +550,41 @@ def _tag_record_internal(
                 warnings,
                 sample_id,
                 firered_lid_config=firered_lid_config,
+            )
+
+    if speaker_asr_required:
+        if deferred_firered_lid:
+            # FireRed LID is an audio-language model. For an empty input
+            # transcript, language_content.language is derived from the
+            # speaker-v2 ASR text along with the other language tags.
+            if not speaker_asr_transcript:
+                stages.add(STAGE_FIRERED_LID)
+        stages = _apply_no_transcript_speech_stage_guard(
+            sample,
+            tags,
+            stages,
+            warnings,
+            allow_language_from_speaker_asr=bool(speaker_asr_transcript),
+        )
+        if (
+            speaker_asr_transcript
+            and (
+                STAGE_LANGUAGE_DETERMINISTIC in stages
+                or STAGE_TOPIC in stages
+                or deferred_firered_lid
+            )
+        ):
+            _run_language_content_tools(
+                record,
+                tags,
+                internal_results,
+                warnings,
+                sample_id,
+                topic_config=topic_config,
+                topic_client=topic_client,
+                stages=stages,
+                transcript_override=speaker_asr_transcript,
+                include_language=deferred_firered_lid,
             )
 
     warnings.extend(
@@ -644,37 +700,35 @@ def _filter_missing_tag_paths(tags, tag_paths):
     return result
 
 
-def _apply_no_transcript_speech_stage_guard(sample, tags, stages, warnings):
+def _apply_no_transcript_speech_stage_guard(
+    sample,
+    tags,
+    stages,
+    warnings,
+    allow_language_from_speaker_asr=False,
+):
     # type: (Dict[str, Any], Dict[str, Any], set, List[Dict[str, Any]]) -> set
     if _has_transcript(sample):
         return stages
-    skipped = stages & set(
-        [
-            STAGE_LANGUAGE_DETERMINISTIC,
-            STAGE_TOPIC,
-            STAGE_SILENCE,
-            STAGE_SPEAKER,
-            STAGE_DNSMOS,
-            STAGE_RECRIR,
-            STAGE_FIRERED_LID,
-        ]
-    )
+    skipped_stages = [STAGE_FIRERED_LID]
+    if not allow_language_from_speaker_asr:
+        skipped_stages.extend([STAGE_LANGUAGE_DETERMINISTIC, STAGE_TOPIC])
+    skipped = stages & set(skipped_stages)
     if not skipped:
         return stages
     stages = set(stages) - skipped
     _null_language_content_tags(tags)
-    _null_silence_tags(tags)
-    _null_dnsmos_tags(tags)
-    _null_recrir_tags(tags)
-    _set_no_transcript_speaker_tags(tags)
+    message = (
+        "sample.text.transcript is empty; language-content text stages use the "
+        "speaker-v2 ASR transcript"
+        if allow_language_from_speaker_asr
+        else "sample.text.transcript is empty; skipping language-content stages "
+        "while continuing audio and non-language stages"
+    )
     warnings.append(
         {
             "type": "speech_dependent_stages_skipped_no_transcript",
-            "message": (
-                "sample.text.transcript is empty; treating the sample as non-speech "
-                "noise and skipping language, VAD, DNSMOS, speaker model, and "
-                "Rec-RIR stages"
-            ),
+            "message": message,
             "skipped_stages": sorted(skipped),
         }
     )
@@ -901,11 +955,34 @@ def _run_language_content_tools(
     topic_config=None,
     topic_client=None,
     stages=None,
+    transcript_override=None,
+    include_language=False,
 ):
     # type: (Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], str, Optional[TopicConfig], Any, Optional[set]) -> None
     stages = stages or set([STAGE_LANGUAGE_DETERMINISTIC, STAGE_TOPIC])
     sample = record["sample"]
-    transcript = sample.get("text", {}).get("transcript", "")
+    transcript = (
+        sample.get("text", {}).get("transcript", "")
+        if transcript_override is None
+        else transcript_override
+    )
+    if include_language:
+        try:
+            apply_result(
+                tags,
+                internal_results,
+                deterministic_language_content.detect_language(transcript),
+            )
+        except Exception as exc:  # noqa: BLE001 - language failures become warnings.
+            warnings.append(
+                {
+                    "type": "language_content_tool_error",
+                    "message": str(exc),
+                    "sample_id": sample_id,
+                    "tool_name": "language_detector",
+                }
+            )
+            tags["language_content"]["language"] = None
     if STAGE_LANGUAGE_DETERMINISTIC in stages:
         try:
             for result in DETERMINISTIC_LANGUAGE_CONTENT_TOOL["run"](transcript):
@@ -926,8 +1003,11 @@ def _run_language_content_tools(
     if STAGE_TOPIC not in stages or not config.enabled:
         return
     try:
+        topic_record = record
+        if transcript_override is not None:
+            topic_record = _record_with_transcript(record, transcript_override)
         result = TOPIC_LANGUAGE_CONTENT_TOOL["run"](
-            record,
+            topic_record,
             context={},
             config=config,
             client=topic_client,
@@ -952,6 +1032,18 @@ def _run_language_content_tools(
             }
         )
         tags["language_content"]["topic"] = None
+
+
+def _record_with_transcript(record, transcript):
+    # Keep the supplied record immutable while allowing topic to consume the
+    # speaker-v2 ASR transcript as its text input.
+    patched = dict(record)
+    sample = dict(record["sample"])
+    text = dict(sample["text"])
+    text["transcript"] = transcript
+    sample["text"] = text
+    patched["sample"] = sample
+    return patched
 
 
 def _run_firered_lid_tool(
@@ -1008,7 +1100,7 @@ def _run_speaker_tools(
             }
         )
         _null_speaker_tags(tags)
-        return
+        return ""
 
     config = speaker_config or default_speaker_evidence_config()
     artifact_root = (
@@ -1059,6 +1151,10 @@ def _run_speaker_tools(
                 },
             ).to_record()
         )
+        asr_transcript = result.get("speaker_asr_transcript", "")
+        if not isinstance(asr_transcript, str):
+            asr_transcript = ""
+        return asr_transcript.strip()
     except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
         warnings.append(
             {
@@ -1070,6 +1166,7 @@ def _run_speaker_tools(
             }
         )
         _null_speaker_tags(tags)
+        return ""
 
 
 def _null_speaker_tags(tags):
@@ -2045,6 +2142,30 @@ def build_arg_parser():
         help="Python executable for FireRed AED subprocess. Defaults to local_config.py.",
     )
     parser.add_argument(
+        "--firered-aed-min-singing-ratio",
+        type=float,
+        default=0.10,
+        help=(
+            "Minimum singing event ratio for singing to enter "
+            "sound_field_scene.speech_music_events. Defaults to 0.10, "
+            "matching --firered-aed-min-music-ratio; calibrated on "
+            "caption_pairs_3000 where singing false positives on speech "
+            "stay below 0.10."
+        ),
+    )
+    parser.add_argument(
+        "--firered-aed-min-music-ratio",
+        type=float,
+        default=0.10,
+        help=(
+            "Minimum music event ratio for sound_field_scene.music_present "
+            "to be true. Defaults to 0.10, calibrated on caption_pairs_3000: "
+            "speech frames with music confidence above the frame threshold "
+            "produce short segments whose ratio stays below 0.10, while "
+            "real music occupies far more of the clip."
+        ),
+    )
+    parser.add_argument(
         "--dass-use-gpu",
         action="store_true",
         help="Use GPU for DASS noise-type inference. Defaults to CPU.",
@@ -2236,6 +2357,8 @@ def main(argv=None):
     )
     firered_aed_config = FireRedAedConfig(
         use_gpu=args.firered_aed_use_gpu,
+        min_singing_ratio=args.firered_aed_min_singing_ratio,
+        min_music_ratio=args.firered_aed_min_music_ratio,
         subprocess_python=args.firered_aed_python,
     )
     dass_config = DassNoiseTypeConfig(

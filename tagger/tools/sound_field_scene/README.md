@@ -15,9 +15,19 @@ boolean for compatibility:
 | --- | --- |
 | Detected classes in fixed `speech`, `singing`, `music` order | `sound_field_scene.speech_music_events` |
 | No detected class | `sound_field_scene.speech_music_events = []` |
-| At least one `music` segment | `sound_field_scene.music_present = true` |
-| No `music` segment | `sound_field_scene.music_present = false` |
+| `music` segments whose event ratio meets `min_music_ratio` | `sound_field_scene.music_present = true` |
+| No `music` segment, or only segments below the ratio floor | `sound_field_scene.music_present = false` |
 | Model, dependency, inference, or validation failure | Both fields are `null` |
+
+`singing` and `music` participate in `speech_music_events` only when their
+event ratios meet the config floors `min_singing_ratio` / `min_music_ratio`
+(both default `0.10`; CLI `--firered-aed-min-singing-ratio` /
+`--firered-aed-min-music-ratio`). Calibrated on caption_pairs_3000
+(2026-08-25): frame-level singing/music false positives on speech produce
+short segments whose ratio stays below `0.10`, while real singing or music
+occupies far more of the clip. The gates keep `speech_music_events` and
+`music_present` mutually consistent; gated segments remain visible in the
+internal evidence (`event_segments`, `event_ratios`, `event_gates`).
 
 Validated `speech`/`singing`/`music` segments and upstream thresholded-frame
 ratios are retained as internal tool evidence and do not enter the tags-only

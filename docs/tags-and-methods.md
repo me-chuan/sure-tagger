@@ -157,8 +157,8 @@ Brouhaha 同时预测逐帧 C50，但该值只作为内部 evidence
 
 | Tag | 类型 / 单位 | 打标方法 | 含义 |
 | --- | --- | --- | --- |
-| `sound_field_scene.speech_music_events` | string array | FireRed AED | 检出的 `speech`、`singing`、`music` 类别，始终按这个固定顺序排列。事件时间段和帧比例仅保留为内部 evidence。 |
-| `sound_field_scene.music_present` | boolean | FireRed AED | `speech_music_events` 是否包含 `music`。保留该字段用于直接进行音乐样本筛选。 |
+| `sound_field_scene.speech_music_events` | string array | FireRed AED | 检出的 `speech`、`singing`、`music` 类别，始终按这个固定顺序排列。`singing`、`music` 仅在事件占比达到 `--firered-aed-min-singing-ratio` / `--firered-aed-min-music-ratio`（均默认 0.10，2026-08-25 起：caption_pairs_3000 上语音帧被帧级误判为歌声/音乐产生的短段占比均低于 0.10，真实歌声/音乐占比远高于此）时进入数组。事件时间段和帧比例仅保留为内部 evidence。 |
+| `sound_field_scene.music_present` | boolean | FireRed AED | `speech_music_events` 是否包含 `music`（受上述占比门控）。保留该字段用于直接进行音乐样本筛选。 |
 | `sound_field_scene.external_noise_type` | string array | DASS AudioSet-2M | 检出的 docs/DASS.md 噪音类别键数组：`music`、`animal`、`mechanical`、`nature`、`formless`、`channel_environment`（人类声音与未归类标签永不公开）。类别由全量 527 类向量中未被排除且达到默认阈值 `0.25`（2026-08-24 在 phase2 上校准：DASS-medium 真实噪声类分数偏软 0.1–0.45，干净语音低于 0.15）的标签归组而来，按各类别最高分降序排列；具体标签见 `noise_composition`。 |
 | `sound_field_scene.noise_composition` | object | DASS AudioSet-2M + FireRed AED 门控 | 按 docs/DASS.md 类别归组的背景声组成，展开 `external_noise_type` 每个类别的具体标签。固定含 `music`、`animal`、`mechanical`、`nature`、`formless`、`channel_environment` 六个键，每键为按分数降序的标签名数组；每类最多 `--dass-composition-top-k`（默认 3）个，入组阈值 `--dass-composition-threshold`（默认 `0.25`，2026-08-25 起与类别阈值对齐——此前 0.30 会在 0.25–0.30 分数段产生「有类别、无组成」的空档）。音乐类别以 FireRed AED 为准：`music_present` 为 `false` 时为空数组，为 `true` 或 AED 未运行（`null`）时输出 DASS 音乐类标签；人类声音与未归类标签只进内部 evidence。成功无检出时各键为空数组，工具失败时整个字段为 `null`。 |
 
@@ -208,13 +208,14 @@ artifact，不进入公开 tags-only 输出。
 
 ### 3.6 语言内容标签
 
-这些标签只读取 `sample.text.transcript`，不需要音频文件。除 topic 外，
-其余字段都是确定性规则。
+这些标签优先读取 `sample.text.transcript`。当输入 transcript 为空且需要文本
+标签时，pipeline 会使用 speaker-v2 的联合 ASR（MOSS）输出作为替代文本；除
+topic 外，其余文本字段都是确定性规则。
 
 | Tag | 类型 | 打标方法 | 含义 |
 | --- | --- | --- | --- |
 | `language_content.topic` | string | OpenAI-compatible Responses API，可选启用 | 转写文本的层级主题，公开值形如 `major_topic/minor_topic`；置信度、关键词和理由只保存在内部 evidence。 |
-| `language_content.language` | string | Unicode script heuristic | 基于主要字符脚本的粗粒度语言识别，当前映射 `en`、`zh`、`ru`、`ar`、`unknown`。 |
+| `language_content.language` | string | 非空 transcript：FireRed LID 音频模型；空 transcript：speaker-v2 ASR + Unicode heuristic | 非空文本沿用音频语言/方言识别；空文本使用 speaker-v2 ASR 文本识别语言。 |
 | `language_content.word_count` | integer | simple multilingual tokenizer | transcript 中的词数。 |
 | `language_content.punctuation` | object | Unicode punctuation counter | `punctuation_count` 和 `has_terminal_punctuation`。 |
 | `language_content.repetition` | object | consecutive token ngram rule | `has_repetition` 和 `repetition_count`。 |
@@ -227,8 +228,8 @@ topic 短 utterance guard 会把 `yeah`、`ok`、`uh` 这类缺少主题信息�
 ## 4. 模型输入预处理
 
 Pipeline 保留原音频文件，不会先生成一个供所有模型共享的转换版本。每个
-模型适配器根据自身输入要求单独降混和重采样。确定性语言内容标签只读取
-transcript，不读取音频。
+模型适配器根据自身输入要求单独降混和重采样。语言内容标签读取原始
+transcript；为空时读取 speaker-v2 ASR，不额外处理音频。
 
 | 模块 | 实际送入模型的格式 | 处理方式 |
 | --- | --- | --- |
@@ -239,8 +240,8 @@ transcript，不读取音频。
 | DNSMOS | 16 kHz、单通道 | 多通道取均值，使用 librosa 重采样。 |
 | Rec-RIR | 16 kHz、单通道 | torchaudio 对多通道取均值并重采样，临时 WAV 推理后删除。 |
 | Speaker v2 | 各模型适配器要求的单通道采样率 | MOSS、Sortformer、Pyannote、ECAPA、FireRed VAD 和 Brouhaha 分别在适配器内完成解码、降混与重采样，再按 profile 融合 claim。 |
-| 确定性语言内容 | 原始 transcript | 不做音频预处理；直接对输入文本 tokenize 和统计。 |
-| Topic | 原始 transcript | 不做音频预处理；启用时将 transcript 和空上下文封装成 JSON prompt 发送到 OpenAI-compatible Responses API。 |
+| 确定性语言内容 | 原始 transcript，或 transcript 为空时的 speaker-v2 ASR | 不做音频预处理；直接对文本 tokenize 和统计；空 transcript 时语言字段也使用同一 ASR 文本。 |
+| Topic | 原始 transcript，或 transcript 为空时的 speaker-v2 ASR | 不做音频预处理；启用时将文本和空上下文封装成 JSON prompt 发送到 OpenAI-compatible Responses API。 |
 
 因此 8 kHz 或双通道音频可以正常进入模型。需要注意，8 kHz 上采样只能
 满足模型输入格式，无法恢复原音频 4 kHz 以上已经不存在的频率信息；多通道

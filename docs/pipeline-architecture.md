@@ -90,43 +90,35 @@ pipeline 会自动补跑 `audio_probe`。
 
 ## 4. 无 transcript guard
 
-如果 `sample.text.transcript` 为空，pipeline 会把该样本视为非语音或无可用语音
-文本样本，并跳过这些 speech-dependent stages：
+如果 `sample.text.transcript` 为空，pipeline 会先尝试使用 speaker-v2 的联合
+ASR（MOSS）生成替代文本。生成成功时，language-content 的全部标签使用这段
+ASR 文本；生成失败时才跳过依赖语言内容的 stage。其它音频和非语言 stages
+仍按正常流程运行：
 
 ```text
 language_deterministic
 topic
-silence
-speaker
-dnsmos
-recrir
 firered_lid
 ```
 
-对应 public tags 会被设置为：
+没有可用 ASR 时，对应的 language-content public tags 会被设置为：
 
 ```text
-language_content.* = null
-basic_acoustic.silence_segments = null
-basic_acoustic.silence_ratio = null
-audio_quality.dnsmos_* = null
-room_acoustic.rt60_sec = null
-room_acoustic.c50_db = null
-speaker.speaker_count = 0
-speaker.multi_speaker = false
-speaker.speaker_change_count = 0
-speaker.speaker_change = false
-speaker.overlap_ratio = 0.0
-speaker.speaker_overlap = false
+language_content.* = null  （仅在 speaker-v2 没有可用 ASR 时）
 ```
 
-这些 stage 不会调用外部模型或 API。`audio_probe`、`brouhaha`、`firered_aed`
-和 `dass` 仍可运行，因为它们可以用于纯噪声或无 transcript 音频的基础音频
-分析和声音事件展示。
+`topic` 仍遵循默认关闭的配置；即使 ASR 可用，未启用 topic 时该字段也保持
+`null`。
 
-补标时这个 guard 仍然生效。若某条无 transcript 样本已有旧标签，但本次又
-选择了上述 speech-dependent stage，pipeline 会按当前规则重置相关字段，以
-避免对无语音文本样本继续做 speech-specific 推理。
+speaker-v2 ASR 只作为 language-content 的输入，不会把输入 transcript 传入
+speaker resolver。`audio_probe`、`silence`、
+`speaker`、`brouhaha`、`dnsmos`、`firered_aed`、`dass` 和 `recrir` 仍可运行，
+因为它们可以用于纯噪声或无 transcript 音频的基础音频、声学、说话人和声场分析。
+
+补标时这个行为也生效。若某条无 transcript 样本已有旧标签，本次选择
+`language_content.*` 时会先运行 speaker-v2 以获取替代文本；只有拿不到 ASR
+时才按当前规则重置 language-content 字段。补其它标签时不会因为 transcript
+为空而跳过对应音频或非语言 stage。
 
 ## 5. 每个环节调用的程序和模型
 
@@ -140,7 +132,8 @@ tagger/tools/language_content/deterministic.py
 
 模型：无。
 
-输入：`sample.text.transcript`。
+输入：非空时使用 `sample.text.transcript`；为空时使用 speaker-v2 的 MOSS
+联合 ASR 文本。
 
 输出：
 
@@ -151,8 +144,8 @@ language_content.repetition
 language_content.filler
 ```
 
-注意：`language_content.language` 不再由文本启发式产出，改由 FireRed LID
-音频模型产出（见 5.11）。
+`language_content.language` 在非空 transcript 时由 FireRed LID 音频模型产出；
+空 transcript 时改由上述 ASR 文本的 Unicode script heuristic 产出。
 
 ### 5.1b FireRed LID
 
@@ -418,6 +411,12 @@ sound_field_scene.speech_music_events
 sound_field_scene.music_present
 ```
 
+2026-08-25 起 `singing`、`music` 进入 `speech_music_events`（及 `music_present = true`）
+需满足事件占比 ≥ `--firered-aed-min-singing-ratio` / `--firered-aed-min-music-ratio`
+（均默认 0.10，caption_pairs_3000 校准：语音帧被帧级误判为歌声/音乐的短段占比均 < 0.10，
+真实歌声/音乐占比远高）。被门控的段仍保留在内部 evidence
+（`event_segments`/`event_ratios`/`event_gates`）。
+
 ### 5.9 PANNs（已废弃，2026-08-25）
 
 程序：
@@ -598,10 +597,10 @@ tags，再运行本次指定的 stage。
 pipeline 会自动补跑 `audio_probe`。例如只补 `speaker.*` 时，如果
 `basic_acoustic.duration_sec` 或 `channels` 缺失，会先读取音频元数据。
 
-无 transcript guard 在补标模式也会生效。也就是说，对 transcript 为空的样本
-补 `topic`、`silence`、`speaker`、`dnsmos` 或 `recrir` 时，pipeline 不会调用
-对应模型，而会按当前规则写入 `null`，或把 speaker count/ratio 写为零、
-boolean 写为 `false`。
+无 transcript guard 在补标模式也会生效。对 transcript 为空的样本补
+`language_content.*` 时，pipeline 会先尝试使用 speaker-v2 ASR 作为替代文本；
+只有没有可用 ASR 时才按当前规则写入 `null`。补其它标签时仍会调用对应音频
+或非语言工具。
 
 ## 7. 常用命令
 

@@ -38,6 +38,8 @@ class FireRedAedConfig:
         speech_threshold=0.4,
         singing_threshold=0.5,
         music_threshold=0.5,
+        min_singing_ratio=0.10,
+        min_music_ratio=0.10,
         min_event_frame=20,
         max_event_frame=2000,
         min_silence_frame=20,
@@ -55,6 +57,12 @@ class FireRedAedConfig:
         self.speech_threshold = speech_threshold
         self.singing_threshold = singing_threshold
         self.music_threshold = music_threshold
+        self.min_singing_ratio = _require_probability(
+            min_singing_ratio, "min_singing_ratio"
+        )
+        self.min_music_ratio = _require_probability(
+            min_music_ratio, "min_music_ratio"
+        )
         self.min_event_frame = min_event_frame
         self.max_event_frame = max_event_frame
         self.min_silence_frame = min_silence_frame
@@ -74,6 +82,8 @@ class FireRedAedConfig:
             self.speech_threshold,
             self.singing_threshold,
             self.music_threshold,
+            self.min_singing_ratio,
+            self.min_music_ratio,
             self.min_event_frame,
             self.max_event_frame,
             self.min_silence_frame,
@@ -90,7 +100,11 @@ class FireRedAedConfig:
             {
                 "supported_sample_rate_hz": SUPPORTED_SAMPLE_RATE_HZ,
                 "public_mapping": {
-                    "speech_music_events": "detected event names in model class order",
+                    "speech_music_events": (
+                        "detected event names in model class order; singing "
+                        "and music only when their event ratios meet the "
+                        "configured min_*_ratio floors"
+                    ),
                     "music_present": "music event present",
                 },
                 "subprocess_python": self.subprocess_python,
@@ -209,6 +223,24 @@ def run(audio_path, duration_sec, context=None, config=None, client=None, **_kwa
     event_segments, event_ratios = validate_aed_output(raw_output, duration_sec)
 
     audio_events = [name for name in EVENT_NAMES if event_segments[name]]
+    # singing and music require substantive content: each event's ratio must
+    # meet its config floor. Frame-level false positives on speech (voiced
+    # frames with singing/music confidence above the frame thresholds)
+    # produce short segments whose ratio is far below the floor, so the
+    # gates keep them out of the public events and out of music_present.
+    # Raw segments stay in the internal evidence regardless.
+    gate_floors = {
+        "singing": config.min_singing_ratio,
+        "music": config.min_music_ratio,
+    }
+    gated = {
+        name: (
+            name in audio_events
+            and event_ratios[name] < gate_floors[name]
+        )
+        for name in gate_floors
+    }
+    audio_events = [name for name in audio_events if not gated.get(name, False)]
     values = {
         "sound_field_scene.speech_music_events": audio_events,
         "sound_field_scene.music_present": "music" in audio_events,
@@ -217,6 +249,13 @@ def run(audio_path, duration_sec, context=None, config=None, client=None, **_kwa
         "config": config.to_record(),
         "event_segments": event_segments,
         "event_ratios": event_ratios,
+        "event_gates": {
+            name: {
+                "min_ratio": gate_floors[name],
+                "gated": gated[name],
+            }
+            for name in gate_floors
+        },
     }
     return [
         ToolResult(
@@ -300,6 +339,8 @@ def _subprocess_config(config):
         "speech_threshold": config.speech_threshold,
         "singing_threshold": config.singing_threshold,
         "music_threshold": config.music_threshold,
+        "min_singing_ratio": config.min_singing_ratio,
+        "min_music_ratio": config.min_music_ratio,
         "min_event_frame": config.min_event_frame,
         "max_event_frame": config.max_event_frame,
         "min_silence_frame": config.min_silence_frame,
@@ -364,6 +405,13 @@ def _require_number(value, path):
     value = float(value)
     if value != value or value in (float("inf"), float("-inf")):
         raise FireRedAedError("%s must be finite" % path)
+    return value
+
+
+def _require_probability(value, path):
+    value = _require_number(value, path)
+    if value < 0 or value > 1:
+        raise FireRedAedError("%s must be within [0, 1]" % path)
     return value
 
 

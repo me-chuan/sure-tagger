@@ -300,6 +300,98 @@ class AcousticToolsTest(unittest.TestCase):
             )
             self.assertEqual(tags["language_content"]["filler"], 1)
 
+    def test_empty_transcript_uses_speaker_asr_for_language_content(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "meeting.wav"
+            write_test_wav(path, sample_rate=16000, channels=1, duration_sec=2.0)
+            record = make_record(str(path))
+            record["sample"]["text"]["transcript"] = ""
+            asr_text = "Um hello hello."
+            public_speaker = {
+                "speaker_count": 1,
+                "multi_speaker": False,
+                "speaker_change_count": 0,
+                "speaker_change": False,
+                "overlap_ratio": 0.0,
+                "speaker_overlap": False,
+            }
+            topic_client = FakeTopicClient(
+                {
+                    "major_topic": "daily_life_social",
+                    "minor_topic": "small_talk",
+                    "confidence": 0.8,
+                    "topic_keywords": ["hello"],
+                    "proper_nouns": [],
+                    "reason_short": "The speaker ASR is a greeting.",
+                    "secondary_topics": [],
+                }
+            )
+
+            with mock.patch(
+                "tagger.pipelines.tagging.run_speaker_v2_record",
+                return_value={
+                    "speaker": public_speaker,
+                    "speaker_asr_transcript": asr_text,
+                    "run_profile": "quality-shadow",
+                    "policy_version": "policy-v1",
+                    "policy_hash": "hash",
+                    "fusion_artifact": "fusion.json.gz",
+                    "artifacts": {},
+                },
+            ) as run_speaker:
+                tags = tag_sample_record(
+                    record,
+                    tmpdir,
+                    speaker_config=object(),
+                    topic_config=TopicConfig(enabled=True, cache_enabled=False),
+                    topic_client=topic_client,
+                    selected_tag_paths=["language_content"],
+                )
+
+            self.assertEqual(run_speaker.call_count, 1)
+            self.assertEqual(tags["language_content"]["language"], "en")
+            self.assertEqual(tags["language_content"]["word_count"], 3)
+            self.assertEqual(tags["language_content"]["filler"], 1)
+            self.assertEqual(
+                tags["language_content"]["punctuation"],
+                {"punctuation_count": 1, "has_terminal_punctuation": True},
+            )
+            self.assertTrue(tags["language_content"]["repetition"]["has_repetition"])
+            self.assertEqual(topic_client.call_count, 1)
+            self.assertIn(asr_text, topic_client.prompts[0])
+
+    def test_empty_transcript_language_tag_uses_speaker_asr(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "meeting.wav"
+            write_test_wav(path, sample_rate=16000, channels=1, duration_sec=2.0)
+            record = make_record(str(path))
+            record["sample"]["text"]["transcript"] = ""
+
+            with mock.patch(
+                "tagger.pipelines.tagging.run_speaker_v2_record",
+                return_value={
+                    "speaker": {
+                        "speaker_count": 1,
+                        "multi_speaker": False,
+                        "speaker_change_count": 0,
+                        "speaker_change": False,
+                        "overlap_ratio": 0.0,
+                        "speaker_overlap": False,
+                    },
+                    "speaker_asr_transcript": "Hello world.",
+                },
+            ) as run_speaker:
+                tags = tag_sample_record(
+                    record,
+                    tmpdir,
+                    speaker_config=object(),
+                    selected_tag_paths=["language_content.language"],
+                )
+
+            self.assertEqual(run_speaker.call_count, 1)
+            self.assertEqual(tags["language_content"]["language"], "en")
+            self.assertIsNone(tags["language_content"]["word_count"])
+
     def test_tagging_pipeline_uses_speaker_v2_public_output(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "meeting.wav"
@@ -468,12 +560,15 @@ class AcousticToolsTest(unittest.TestCase):
             )
             self.assertEqual(client.call_count, 0)
 
-    def test_tagging_pipeline_skips_speech_dependent_stages_without_transcript(self):
+    def test_tagging_pipeline_skips_only_language_stages_without_transcript(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "noise.wav"
             write_test_wav(path, sample_rate=16000, channels=1, duration_sec=2.0)
             record = make_record(str(path))
             record["sample"]["text"]["transcript"] = ""
+            record["sample"]["native_metadata"]["speech_segments"] = [
+                {"start_sec": 0.5, "end_sec": 1.5}
+            ]
             topic_client = FakeTopicClient(
                 {
                     "major_topic": "daily_life_social",
@@ -489,15 +584,14 @@ class AcousticToolsTest(unittest.TestCase):
                 {
                     "sig": 3.0,
                     "bak": 3.0,
-                    "ovr": 3.0,
-                    "p808_mos": 3.0,
+                    "ovrl": 3.0,
+                    "p808": 3.0,
                 }
             )
             recrir_client = FakeRecRirClient(
                 {
-                    "metadata_version": "rec_rir_v0.1",
                     "sample_rate_hz": 16000,
-                    "rir": [1.0, 0.0],
+                    "samples": [1.0, 0.0],
                 }
             )
 
@@ -519,17 +613,20 @@ class AcousticToolsTest(unittest.TestCase):
             )
 
             self.assertEqual(topic_client.call_count, 0)
-            self.assertEqual(dnsmos_client.call_count, 0)
-            self.assertEqual(recrir_client.call_count, 0)
+            self.assertEqual(dnsmos_client.call_count, 1)
+            self.assertEqual(recrir_client.call_count, 1)
             self.assertTrue(all(value is None for value in tags["language_content"].values()))
-            self.assertIsNone(tags["basic_acoustic"]["silence_segments"])
-            self.assertIsNone(tags["basic_acoustic"]["silence_ratio"])
-            self.assertIsNone(tags["audio_quality"]["dnsmos_ovrl"])
-            self.assertIsNone(tags["room_acoustic"]["rt60_sec"])
-            self.assertIsNone(tags["room_acoustic"]["c50_db"])
+            self.assertEqual(
+                tags["basic_acoustic"]["silence_segments"],
+                [
+                    {"start_sec": 0.0, "end_sec": 0.5},
+                    {"start_sec": 1.5, "end_sec": 2.0},
+                ],
+            )
+            self.assertEqual(tags["basic_acoustic"]["silence_ratio"], 0.5)
+            self.assertEqual(tags["audio_quality"]["dnsmos_ovrl"], 3.0)
+            self.assertEqual(tags["speaker"]["speaker_count"], 1)
             self.assertFalse(tags["speaker"]["multi_speaker"])
-            self.assertFalse(tags["speaker"]["speaker_change"])
-            self.assertFalse(tags["speaker"]["speaker_overlap"])
 
     def test_topic_validation_repairs_known_minor_under_wrong_major(self):
         payload = {
@@ -634,6 +731,105 @@ class AcousticToolsTest(unittest.TestCase):
                 ]["speech"],
                 0.85,
             )
+
+    def test_fire_red_aed_gates_music_present_by_min_music_ratio(self):
+        def run_with_ratio(ratio):
+            results = run_firered_aed_detector(
+                "audio.wav",
+                duration_sec=10.0,
+                config=FireRedAedConfig(subprocess_python=""),
+                client=FakeFireRedAedClient(
+                    {
+                        "event2timestamps": {
+                            "speech": [[0.1, 9.0]],
+                            "singing": [],
+                            "music": [[0.5, 1.0]],
+                        },
+                        "event2ratio": {
+                            "speech": 0.89,
+                            "singing": 0.0,
+                            "music": ratio,
+                        },
+                    }
+                ),
+            )
+            return {r.tag_path: r for r in results}
+
+        # Music segments exist but the ratio stays below the default 0.10
+        # floor: music is gated out of the public events, music_present is
+        # False, and the gate is recorded in the internal evidence.
+        by_path = run_with_ratio(0.05)
+        self.assertFalse(by_path["sound_field_scene.music_present"].value)
+        self.assertEqual(
+            by_path["sound_field_scene.speech_music_events"].value, ["speech"]
+        )
+        self.assertEqual(
+            by_path["sound_field_scene.music_present"].evidence["event_gates"],
+            {
+                "singing": {"min_ratio": 0.10, "gated": False},
+                "music": {"min_ratio": 0.10, "gated": True},
+            },
+        )
+
+        # Substantive music passes the gate.
+        by_path = run_with_ratio(0.25)
+        self.assertTrue(by_path["sound_field_scene.music_present"].value)
+        self.assertEqual(
+            by_path["sound_field_scene.speech_music_events"].value, ["speech", "music"]
+        )
+        self.assertEqual(
+            by_path["sound_field_scene.music_present"].evidence["event_gates"],
+            {
+                "singing": {"min_ratio": 0.10, "gated": False},
+                "music": {"min_ratio": 0.10, "gated": False},
+            },
+        )
+
+    def test_fire_red_aed_gates_singing_by_min_singing_ratio(self):
+        results = run_firered_aed_detector(
+            "audio.wav",
+            duration_sec=10.0,
+            config=FireRedAedConfig(subprocess_python=""),
+            client=FakeFireRedAedClient(
+                {
+                    "event2timestamps": {
+                        "speech": [[0.1, 9.0]],
+                        "singing": [[0.5, 0.9]],
+                        "music": [],
+                    },
+                    "event2ratio": {
+                        "speech": 0.89,
+                        "singing": 0.04,
+                        "music": 0.0,
+                    },
+                }
+            ),
+        )
+        by_path = {r.tag_path: r for r in results}
+
+        # Short singing segments below the 0.10 floor are gated out of the
+        # public events while raw segments stay in the evidence.
+        self.assertEqual(
+            by_path["sound_field_scene.speech_music_events"].value, ["speech"]
+        )
+        self.assertFalse(by_path["sound_field_scene.music_present"].value)
+        self.assertEqual(
+            by_path["sound_field_scene.speech_music_events"].evidence["event_gates"],
+            {
+                "singing": {"min_ratio": 0.10, "gated": True},
+                "music": {"min_ratio": 0.10, "gated": False},
+            },
+        )
+
+    def test_fire_red_aed_min_ratio_floors_must_be_probabilities(self):
+        with self.assertRaises(FireRedAedError):
+            FireRedAedConfig(min_music_ratio=1.5)
+        with self.assertRaises(FireRedAedError):
+            FireRedAedConfig(min_music_ratio=-0.1)
+        with self.assertRaises(FireRedAedError):
+            FireRedAedConfig(min_singing_ratio=1.5)
+        with self.assertRaises(FireRedAedError):
+            FireRedAedConfig(min_singing_ratio=-0.1)
 
     def test_fire_red_aed_rejects_invalid_event_output(self):
         with self.assertRaises(FireRedAedError):
