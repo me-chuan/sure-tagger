@@ -1,6 +1,8 @@
 """Claim-aware resolver layered on the frozen legacy claim logic."""
 
 import copy
+import math
+import re
 
 from tagger.tools.speaker_v2._legacy import load_legacy_module
 from tagger.tools.speaker_v2.contracts import stable_id
@@ -25,6 +27,7 @@ def resolve(
     hypotheses=None,
     claim_policy=_UNSET,
     profile_id="legacy-shadow",
+    speaker_profiles=_UNSET,
 ):
     """Resolve speaker claims using a versioned per-claim source policy.
 
@@ -45,6 +48,10 @@ def resolve(
     if claim_policy is None:
         raise ClaimPolicyError("claim_policy cannot be null")
     validate_claim_policy(claim_policy)
+    if speaker_profiles is _UNSET:
+        speaker_profiles = _profiles_from_evidence(evidence)
+    if speaker_profiles is not _UNSET:
+        speaker_profiles = _normalize_speaker_profiles(speaker_profiles)
     profile_id = str(profile_id)
 
     # This preserves all raw observations/comparisons and performs the frozen
@@ -77,7 +84,10 @@ def resolve(
     fusion["evaluation_output"] = build_evaluation_output(
         fusion["claims"],
         fusion["derived_metrics"],
+        speaker_profiles=speaker_profiles,
     )
+    if speaker_profiles is not _UNSET:
+        fusion["speaker_profiles"] = copy.deepcopy(speaker_profiles)
     _publish_public_adapter(fusion, fusion["evaluation_output"]["speaker"])
     identity = {
         "schema_version": fusion["schema_version"],
@@ -124,6 +134,7 @@ def validate_fusion(fusion):
         expected_output = build_evaluation_output(
             fusion.get("claims", {}),
             fusion.get("derived_metrics", {}),
+            speaker_profiles=fusion.get("speaker_profiles", _UNSET),
         )
         if fusion.get("evaluation_output") != expected_output:
             raise ValueError("evaluation output does not match resolved claims")
@@ -134,7 +145,9 @@ def validate_fusion(fusion):
             raise ValueError("public adapter does not match resolved speaker output")
 
 
-def build_evaluation_output(claims, derived_metrics=None):
+def build_evaluation_output(
+    claims, derived_metrics=None, speaker_profiles=_UNSET
+):
     derived_metrics = derived_metrics or {}
     claim_outputs = {}
     for claim_name in (
@@ -164,6 +177,8 @@ def build_evaluation_output(claims, derived_metrics=None):
         "overlap_ratio": metric_outputs["overlap_ratio"]["value"],
         "speaker_overlap": claim_outputs["speaker_overlap"]["value"],
     }
+    if speaker_profiles is not _UNSET:
+        speaker["profiles"] = copy.deepcopy(speaker_profiles)
     return {
         "schema_version": EVALUATION_OUTPUT_SCHEMA_VERSION,
         "artifact_purpose": "speaker_metadata",
@@ -261,6 +276,77 @@ def _publish_public_adapter(fusion, speaker_output):
     public_adapter["enabled"] = True
     public_adapter["reason"] = "direct claim-policy resolver output"
     public_adapter["speaker"] = copy.deepcopy(speaker_output)
+
+
+def _profiles_from_evidence(evidence):
+    candidates = [
+        item
+        for item in evidence
+        if "speaker_profile" in item.get("capabilities", [])
+        and item.get("status") in ("observed", "estimated", "missing")
+    ]
+    if not candidates:
+        return _UNSET
+    return copy.deepcopy(candidates[0].get("payload", {}).get("profiles"))
+
+
+def _normalize_speaker_profiles(value):
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        return None
+    normalized = []
+    seen_ids = set()
+    for item in value:
+        if not isinstance(item, dict) or not re.match(
+            r"^speaker_[1-9][0-9]*$", str(item.get("speaker_id", ""))
+        ):
+            return None
+        speaker_id = str(item["speaker_id"])
+        if speaker_id in seen_ids:
+            return None
+        seen_ids.add(speaker_id)
+        rate = item.get("speech_rate")
+        if not isinstance(rate, dict):
+            return None
+        band = rate.get("band")
+        unit = rate.get("unit")
+        number = rate.get("value")
+        if band not in (None, "slow", "normal", "fast", "variable"):
+            return None
+        if unit not in (None, "zh_char_per_sec", "word_per_min"):
+            return None
+        if number is not None and (
+            isinstance(number, bool)
+            or not isinstance(number, (int, float))
+            or not math.isfinite(float(number))
+        ):
+            return None
+        if unit is None and number is not None:
+            return None
+        if item.get("pitch") not in (None, "low", "mid", "high", "variable"):
+            return None
+        if item.get("speaker_volume") not in (
+            None,
+            "low",
+            "normal",
+            "loud",
+            "variable",
+        ):
+            return None
+        normalized.append(
+            {
+                "speaker_id": str(item["speaker_id"]),
+                "speech_rate": {
+                    "band": band,
+                    "value": number,
+                    "unit": unit,
+                },
+                "pitch": item.get("pitch"),
+                "speaker_volume": item.get("speaker_volume"),
+            }
+        )
+    return normalized
 
 
 def _derive_numeric_metrics(claims, evidence):

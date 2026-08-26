@@ -1,12 +1,14 @@
 # Language Content Tools
 
 Language-content tools run inside the root tagging pipeline. Deterministic tools
-only require `sample.text.transcript`; topic classification is optional and uses
+use `sample.text.transcript`, or the speaker-v2 MOSS ASR transcript when the input
+text is empty; topic classification is optional and uses
 an OpenAI-compatible Responses API when enabled.
 
 Implemented fields:
 
-- `language_content.language`: Unicode script heuristic language ID.
+- `language_content.language`: Unicode script heuristic language ID for the
+  speaker-v2 ASR fallback; non-empty input uses FireRed LID audio detection.
 - `language_content.word_count`: simple multilingual token word count.
 - `language_content.punctuation`: punctuation count and terminal punctuation flag.
 - `language_content.repetition`: consecutive repeated word/ngram detection.
@@ -44,5 +46,6 @@ proper nouns, prompt version, taxonomy version, and failure details are kept onl
 in internal tool evidence. Short non-content utterances such as `yeah` are
 guarded deterministically as `other/insufficient_context` without an API call.
 
-These tools do not need audio files. Only the optional topic tool needs external
-API access.
+The language-content tool functions themselves do not need audio files. For an
+empty transcript, the root pipeline first invokes speaker-v2 to obtain the ASR
+fallback text; only the optional topic tool needs external API access.

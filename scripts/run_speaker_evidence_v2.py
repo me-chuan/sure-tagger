@@ -232,6 +232,13 @@ def build_arg_parser():
     parser.add_argument("--ecapa-runtime-cache-dir", default="")
     parser.add_argument("--ecapa-calibration-profile-id", default=None)
     _add_model_toggle(parser, "brouhaha", "brouhaha_enabled")
+    parser.add_argument(
+        "--speaker-profile-disable",
+        dest="speaker_profile_enabled",
+        action="store_false",
+        default=True,
+        help="Disable deterministic phase 0/1 speaker profiles.",
+    )
     parser.add_argument("--brouhaha-python", default=str(DEFAULT_BROUHAHA_PYTHON))
     parser.add_argument("--brouhaha-model", default=str(DEFAULT_BROUHAHA_MODEL))
     parser.add_argument("--brouhaha-repo", default=str(DEFAULT_BROUHAHA_REPO))
@@ -350,6 +357,7 @@ def main(argv=None):
         enable_pyannote=args.pyannote_enabled,
         enable_ecapa=args.ecapa_enabled,
         enable_brouhaha=args.brouhaha_enabled,
+        enable_speaker_profile=args.speaker_profile_enabled,
         profile_id=args.profile,
         claim_policy=expanded_run_profile["claim_policy"],
         expanded_run_profile=expanded_run_profile,

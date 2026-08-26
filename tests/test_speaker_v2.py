@@ -9,6 +9,7 @@ import wave
 
 from tagger.pipelines.speaker_evidence import (
     SpeakerEvidenceConfig,
+    _speaker_asr_transcript,
     collect_pyannote_evidence,
     collect_sortformer_evidence,
     collect_whisper_evidence,
@@ -59,6 +60,26 @@ from tagger.tools.speaker_v2.whisper_lexical import WhisperLexicalConfig
 
 
 class SpeakerV2Test(unittest.TestCase):
+    def test_speaker_asr_transcript_ignores_timestamp_only_output(self):
+        evidence = {
+            "source": {"name": "moss_transcribe_diarize"},
+            "payload": {
+                "asr_transcript": "",
+                "timeline_summary": {
+                    "segments": [
+                        {
+                            "start_sec": 0.0,
+                            "end_sec": 10.88,
+                            "speaker_id": "S01",
+                        }
+                    ]
+                },
+                "model_output_text": "[0.00][S01][10.88]",
+            },
+        }
+
+        self.assertEqual(_speaker_asr_transcript([evidence]), "")
+
     def test_evidence_id_is_deterministic_and_excludes_runtime(self):
         first = make_coverage_evidence(runtime={"elapsed_sec": 1.0})
         second = make_coverage_evidence(runtime={"elapsed_sec": 99.0})

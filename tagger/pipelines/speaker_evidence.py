@@ -21,6 +21,7 @@ from tagger.tools.audio_quality.brouhaha_signal_estimator import (
 )
 from tagger.tools.speaker.moss_diarizer import (
     MossDiarizeConfig,
+    parse_moss_text,
     run as run_moss_diarizer,
 )
 from tagger.tools.speaker_v2.artifacts import (
@@ -75,6 +76,10 @@ from tagger.tools.speaker_v2.profiles import (
     validate_claim_policy,
 )
 from tagger.tools.speaker_v2.resolver import resolve
+from tagger.tools.speaker_v2.speaker_profile import (
+    PROFILE_SCHEMA_VERSION as SPEAKER_PROFILE_SCHEMA_VERSION,
+    compute_speaker_profiles,
+)
 from tagger.tools.speaker_v2.sortformer_timeline import (
     CHECKPOINT_SHA256 as SORTFORMER_CHECKPOINT_SHA256,
     MAXIMUM_SPEAKERS as SORTFORMER_MAXIMUM_SPEAKERS,
@@ -164,6 +169,7 @@ class SpeakerEvidenceConfig:
         enable_pyannote=None,
         enable_ecapa=None,
         enable_brouhaha=None,
+        enable_speaker_profile=True,
         score_native=False,
         verify_model_assets=True,
     ):
@@ -260,6 +266,7 @@ class SpeakerEvidenceConfig:
         )
         self.expanded_run_profile["claim_policy"] = copy.deepcopy(policy)
         self.score_native = bool(score_native)
+        self.enable_speaker_profile = bool(enable_speaker_profile)
         self.verify_model_assets = bool(verify_model_assets)
 
 
@@ -707,6 +714,84 @@ def run_record(
         if "speaker_timeline" in item.get("capabilities", [])
         and item.get("status") in ("observed", "estimated")
     ]
+    profile_timeline = _select_identity_candidate_timeline(
+        timelines, config.claim_policy
+    )
+    coverage_evidence = _select_profile_coverage_evidence(evidence)
+    if not config.enable_speaker_profile:
+        profile_bundle = {
+            "profiles": None,
+            "details": {"status": "disabled_by_run_configuration"},
+        }
+    else:
+        try:
+            profile_bundle = compute_speaker_profiles(
+                profile_timeline,
+                coverage_evidence=coverage_evidence,
+                text_evidence=evidence,
+                audio_path=audio_path,
+                duration_sec=duration_sec,
+                sample_rate_hz=audio_info.sample_rate_hz,
+            )
+        except Exception as exc:
+            profile_bundle = {
+                "profiles": None,
+                "details": {
+                    "status": "failed",
+                    "reason": "%s: %s" % (exc.__class__.__name__, exc),
+                },
+            }
+    profile_parents = []
+    if profile_timeline is not None:
+        profile_parents.append(profile_timeline["evidence_id"])
+    if coverage_evidence is not None:
+        profile_parents.append(coverage_evidence["evidence_id"])
+    profile_text_parents = _profile_text_parent_ids(
+        profile_timeline, evidence
+    )
+    profile_parents.extend(profile_text_parents)
+    profile_status = "observed" if profile_bundle["profiles"] is not None else "missing"
+    profile_quality = {
+        "usable": profile_bundle["profiles"] is not None,
+        "deterministic": True,
+        "model_required": False,
+        "reason": profile_bundle["details"].get("status"),
+    }
+    evidence.append(
+        build_evidence(
+            sample_id=sample_id,
+            duration_sec=duration_sec,
+            evidence_type="speaker_profile_acoustic",
+            source_name="speaker_profile_deterministic",
+            source_version=SPEAKER_PROFILE_SCHEMA_VERSION,
+            source_kind="deterministic_acoustic_adapter",
+            capabilities=[
+                "speaker_profile",
+                "speech_rate",
+                "pitch",
+                "speaker_volume",
+            ],
+            dependency_groups=["G_speaker_profile_deterministic"],
+            payload={
+                "profiles": profile_bundle["profiles"],
+                "details": profile_bundle["details"],
+                "decision_timeline_evidence_id": (
+                    profile_timeline.get("evidence_id")
+                    if profile_timeline is not None
+                    else None
+                ),
+            },
+            status=profile_status,
+            quality=profile_quality,
+            lineage={"parent_evidence_ids": profile_parents},
+            applicability={
+                "audio_sha256": audio_sha256,
+                "sample_rate_hz": audio_info.sample_rate_hz,
+                "channels": audio_info.channels,
+                "profile_schema_version": SPEAKER_PROFILE_SCHEMA_VERSION,
+            },
+        )
+    )
     hypothesis = build_count_hypothesis_case(
         sample_id, timelines, all_evidence=evidence
     )
@@ -767,6 +852,7 @@ def run_record(
         hypotheses=hypotheses,
         claim_policy=config.claim_policy,
         profile_id=config.profile_id,
+        speaker_profiles=profile_bundle["profiles"],
     )
     fusion["input_provenance"] = {
         "audio_sha256": audio_sha256,
@@ -817,6 +903,7 @@ def run_record(
                 )
     fusion["speaker_text_tracks"] = native_text_tracks + projected_text_tracks
     fusion["speaker_text_comparisons"] = text_comparisons
+    speaker_asr_transcript = _speaker_asr_transcript(timelines)
 
     # Evaluation happens strictly after evidence collection and resolution.
     if config.score_native:
@@ -844,7 +931,45 @@ def run_record(
         "policy_version": config.claim_policy["policy_version"],
         "policy_hash": claim_policy_hash(config.claim_policy),
         "native_scored": bool(config.score_native),
+        "speaker_asr_transcript": speaker_asr_transcript,
     }
+
+
+def _speaker_asr_transcript(timelines):
+    """Return the parsed text produced by the joint MOSS speaker/ASR source."""
+
+    for evidence in timelines:
+        source = evidence.get("source", {})
+        if source.get("name") != "moss_transcribe_diarize":
+            continue
+        asr_transcript = evidence.get("payload", {}).get("asr_transcript", "")
+        if isinstance(asr_transcript, str) and asr_transcript.strip():
+            return asr_transcript.strip()
+        segments = (
+            evidence.get("payload", {})
+            .get("timeline_summary", {})
+            .get("segments", [])
+        )
+        text = _join_segment_text(segments)
+        if text:
+            return text
+        raw_text = evidence.get("payload", {}).get("model_output_text", "")
+        if isinstance(raw_text, str) and raw_text.strip():
+            parsed_segments = parse_moss_text(raw_text)
+            parsed_text = _join_segment_text(parsed_segments)
+            if parsed_text:
+                return parsed_text
+            if not parsed_segments:
+                return raw_text.strip()
+    return ""
+
+
+def _join_segment_text(segments):
+    return " ".join(
+        str(segment.get("text", "")).strip()
+        for segment in segments or []
+        if isinstance(segment, dict) and str(segment.get("text", "")).strip()
+    ).strip()
 
 
 def collect_moss_evidence(
@@ -874,6 +999,7 @@ def collect_moss_evidence(
             context=context,
             config=config,
         )
+        asr_transcript = _join_segment_text(result.value.get("segments", []))
         summary = summarize_timeline(
             result.value.get("segments", []), scope["duration_sec"]
         )
@@ -895,6 +1021,7 @@ def collect_moss_evidence(
             dependency_groups=["G_moss_td_0_9b"],
             payload={
                 "timeline_summary": summary,
+                "asr_transcript": asr_transcript,
                 "model_output_text": result.value.get("raw_text", ""),
                 "text_dependency_note": (
                     "speaker, timestamp, and text share one joint model group"
@@ -1679,6 +1806,58 @@ def _select_identity_candidate_timeline(timelines, claim_policy):
             if candidates:
                 return candidates[0]
     return None
+
+
+def _select_profile_coverage_evidence(evidence):
+    """Select one speech-coverage source for profile duration accounting."""
+
+    usable = [
+        item
+        for item in evidence
+        if "speech_coverage" in item.get("capabilities", [])
+        and item.get("status") in ("observed", "estimated")
+        and item.get("quality", {}).get("usable", True)
+    ]
+    for source_name in ("brouhaha_vad", "firered_vad"):
+        for item in usable:
+            if item.get("source", {}).get("name") == source_name:
+                return item
+    return usable[0] if usable else None
+
+
+def _profile_text_parent_ids(decision_timeline, evidence):
+    if decision_timeline is not None:
+        summary = decision_timeline.get("payload", {}).get(
+            "timeline_summary", {}
+        )
+        if not isinstance(summary, dict):
+            return []
+        if any(
+            str(item.get("text", "")).strip()
+            for item in summary.get("segments", [])
+            if isinstance(item, dict)
+        ):
+            return []
+    for item in evidence:
+        if "joint_speaker_text" not in item.get("capabilities", []):
+            continue
+        payload = item.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        summary = payload.get("timeline_summary", {})
+        if not isinstance(summary, dict):
+            continue
+        if any(
+            str(segment.get("text", "")).strip()
+            for segment in summary.get("segments", [])
+            if isinstance(segment, dict)
+        ):
+            return [item["evidence_id"]]
+    return [
+        item["evidence_id"]
+        for item in evidence
+        if "lexical_timeline" in item.get("capabilities", [])
+    ]
 
 
 def score_against_native_after_inference(record, timelines, duration_sec):

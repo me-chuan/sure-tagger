@@ -19,6 +19,7 @@ from tagger.tools.speaker_v2.profiles import (
     expand_profile,
     validate_claim_policy,
 )
+from tagger.tools.speaker_v2.speaker_profile import PROFILE_SCHEMA_VERSION
 
 
 _LEGACY = load_legacy_module("artifacts")
@@ -59,6 +60,7 @@ def write_sample_artifacts(
         "run_profile": enriched_fusion["run_profile"],
         "policy_version": enriched_fusion["policy_version"],
         "policy_hash": enriched_fusion["policy_hash"],
+        "speaker_profile_schema_version": PROFILE_SCHEMA_VERSION,
         "claim_policy": copy.deepcopy(enriched_fusion["claim_policy"]),
         "claims": enriched_fusion["claims"],
         "public_adapter": enriched_fusion["public_adapter"],
@@ -69,6 +71,7 @@ def write_sample_artifacts(
     )
     compat_metadata = {
         "schema_version": "speaker_v2.compat_metadata.2",
+        "speaker_profile_schema_version": PROFILE_SCHEMA_VERSION,
         "sample_id": enriched_fusion["sample_id"],
         "profile": enriched_fusion["profile"],
         "speaker": public_speaker,
@@ -88,6 +91,7 @@ def write_sample_artifacts(
             "run_profile": enriched_fusion["run_profile"],
             "policy_version": enriched_fusion["policy_version"],
             "policy_hash": enriched_fusion["policy_hash"],
+            "speaker_profile_schema_version": PROFILE_SCHEMA_VERSION,
             "output": copy.deepcopy(evaluation_output),
         }
         evaluation_path = write_json_gz_atomic(
@@ -141,6 +145,12 @@ def write_run_manifest(
         "artifact_purpose": "speaker_metadata",
         "production_eligible": True,
         "public_adapter_enabled": True,
+        "speaker_profile": {
+            "schema_version": PROFILE_SCHEMA_VERSION,
+            "model_required": False,
+            "enabled": bool(getattr(config, "enable_speaker_profile", True)),
+            "evidence_source": "speaker_profile_deterministic",
+        },
         "speaker_fields": [
             "speaker_count",
             "multi_speaker",
@@ -148,6 +158,7 @@ def write_run_manifest(
             "speaker_change",
             "overlap_ratio",
             "speaker_overlap",
+            "profiles",
         ],
     }
     value["models"] = _model_inventory(config, expanded)

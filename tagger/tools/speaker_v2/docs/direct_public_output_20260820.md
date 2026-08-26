@@ -1,7 +1,7 @@
 # Speaker v2 直接公开输出
 
-> 更新日期：2026-08-20  
-> 状态：certification gate 已移除。
+> 更新日期：2026-08-26  
+> 状态：certification gate 已移除；speaker profile v0.1 已接入 phase 0~1。
 
 ## 输出行为
 
@@ -16,9 +16,25 @@ Speaker v2 不再提供 `SpeakerEvidenceConfig.certification_gate_enabled` 或
   "speaker_change_count": 1,
   "speaker_change": true,
   "overlap_ratio": 0.125,
-  "speaker_overlap": true
+  "speaker_overlap": true,
+  "profiles": [
+    {
+      "speaker_id": "speaker_1",
+      "speech_rate": {
+        "band": "normal",
+        "value": 4.2,
+        "unit": "zh_char_per_sec"
+      },
+      "pitch": "mid",
+      "speaker_volume": "normal"
+    }
+  ]
 }
 ```
+
+`profiles` 使用与 `speaker_count` 相同的 decision timeline。没有可用时间轴时为
+`null`，有效音频但没有语音时为 `[]`；不可靠的单个画像值也保持 `null`。首版只
+发布语言感知语速、相对音高档位和片段内相对音量，不推断年龄、性别、情绪或口音。
 
 `evaluation_output.mode` 固定为 `direct`，`production_eligible` 和
 `public_metadata_published` 固定为 `true`。`compat_metadata.json.gz` 同步保存同一份
@@ -45,6 +61,9 @@ python3.11 scripts/run_speaker_evidence_v2.py \
   --output-dir <output_dir> \
   --profile quality-shadow
 ```
+
+若只需回归六个旧字段，可显式使用 `--speaker-profile-disable`；此时画像 evidence
+记录为 `missing`，不会影响旧 claim。
 
 `legacy-shadow`、`quality-shadow` 和 `lean-shadow` 名称继续保留，用于模型集合和
 claim policy 选择；名称中的 `shadow` 不再表示 public adapter 被禁用。
