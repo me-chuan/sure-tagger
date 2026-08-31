@@ -64,12 +64,10 @@ Supplement selected tags into an existing tags-only output:
 python3 scripts/run_tagger.py \
   --manifest phase2_asr_sample/manifest.jsonl \
   --input-tags outputs/phase2_full_pipeline_tags.jsonl \
-  --output outputs/phase2_topic_patch.jsonl \
+  --output outputs/phase2_asr_patch.jsonl \
   --sample-id EN2001a_utterance_00000 \
-  --only-tags language_content.topic \
-  --topic-enable \
-  --topic-model gpt-5.5 \
-  --topic-api-key-path api.txt
+  --only-tags speaker.asr_transcript \
+  --missing-only
 ```
 
 Compare Brouhaha C50 against Rec-RIR-derived C50 on the bundled manifest:
@@ -99,10 +97,9 @@ Model-backed tools require local model directories/checkpoints. General acoustic
 tools read `tagger/local_config.py`; speaker v2 defaults are defined in
 `tagger/pipelines/speaker_evidence.py`.
 
-OpenAI Responses topic classification reads credentials in this order:
-`OPENAI_API_KEY`, `--topic-api-key`, `api.txt` or `--topic-api-key-path`, then
-the selected provider env in `~/.codex/config.toml`. Do not commit secrets;
-`api.txt`, `.env*`, and `.codex/` are git-ignored.
+`language_content.topic` and its API/CLI integration are no longer part of
+sure-tagger. A downstream language model may generate an open descriptive
+`topic` phrase from the deterministic tags and `speaker.asr_transcript`.
 
 See [the tag and method documentation](docs/tags-and-methods.md) for the public
 fields, preprocessing, and JSON examples. Tool-specific setup details are kept
@@ -113,8 +110,10 @@ in `tagger/tools/basic_acoustic/README.md`,
 
 ## Speaker Pipeline
 
-The `speaker` stage directly runs speaker v2 and publishes six fields:
-`speaker_count`, `multi_speaker`, `speaker_change_count`, `speaker_change`,
-`overlap_ratio`, and `speaker_overlap`. Model evidence and claim routing remain
-internal under `artifacts/speaker_v2/<row-key>/`; only the six resolved values
-enter the tags-only JSONL output.
+The `speaker` stage directly runs speaker v2 and publishes seven scalar fields:
+`speaker_count`, derived `speaker_present`, `multi_speaker`,
+`speaker_change_count`, `speaker_change`, `overlap_ratio`, and
+`speaker_overlap`, plus the `profiles` array and `asr_transcript` string. The
+ASR value is the full-sample MOSS timeline text joined in time order; it never
+comes from `sample.text.transcript`. Model evidence and claim routing remain
+internal under `artifacts/speaker_v2/<row-key>/`.

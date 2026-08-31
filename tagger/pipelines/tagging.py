@@ -64,11 +64,9 @@ from tagger.tools.speaker_v2.profiles import (
 from tagger.tools.language_content.registry import (
     DETERMINISTIC_LANGUAGE_CONTENT_TOOL,
     FIRERED_LID_LANGUAGE_CONTENT_TOOL,
-    TOPIC_LANGUAGE_CONTENT_TOOL,
 )
 from tagger.tools.language_content import deterministic as deterministic_language_content
 from tagger.tools.language_content.firered_lid_detector import FireRedLidConfig
-from tagger.tools.language_content.topic import TopicConfig
 
 
 BASIC_ACOUSTIC_FIELDS = {
@@ -102,6 +100,8 @@ SOUND_FIELD_SCENE_FIELDS = {
 
 SPEAKER_FIELDS = {
     "speaker_count": None,
+    "speaker_present": None,
+    "asr_transcript": None,
     "multi_speaker": None,
     "speaker_change_count": None,
     "speaker_change": None,
@@ -111,7 +111,6 @@ SPEAKER_FIELDS = {
 }
 
 LANGUAGE_CONTENT_FIELDS = {
-    "topic": None,
     "language": None,
     "word_count": None,
     "punctuation": None,
@@ -120,7 +119,6 @@ LANGUAGE_CONTENT_FIELDS = {
 }
 
 STAGE_LANGUAGE_DETERMINISTIC = "language_deterministic"
-STAGE_TOPIC = "topic"
 STAGE_AUDIO_PROBE = "audio_probe"
 STAGE_SILENCE = "silence"
 STAGE_SPEAKER = "speaker"
@@ -138,7 +136,6 @@ STAGE_FIRERED_LID = "firered_lid"
 # must not enter public tags.
 FULL_STAGES = [
     STAGE_LANGUAGE_DETERMINISTIC,
-    STAGE_TOPIC,
     STAGE_AUDIO_PROBE,
     STAGE_SILENCE,
     STAGE_SPEAKER,
@@ -171,7 +168,6 @@ STAGE_TAG_PATHS = {
         "language_content.repetition",
         "language_content.filler",
     ],
-    STAGE_TOPIC: ["language_content.topic"],
     STAGE_AUDIO_PROBE: [
         "basic_acoustic.duration_sec",
         "basic_acoustic.sample_rate_hz",
@@ -183,6 +179,8 @@ STAGE_TAG_PATHS = {
     ],
     STAGE_SPEAKER: [
         "speaker.speaker_count",
+        "speaker.speaker_present",
+        "speaker.asr_transcript",
         "speaker.multi_speaker",
         "speaker.speaker_change_count",
         "speaker.speaker_change",
@@ -226,15 +224,13 @@ def run_manifest(
     dnsmos_config=None,
     firered_aed_config=None,
     dass_config=None,
-    topic_config=None,
-    topic_client=None,
     firered_lid_config=None,
     sample_ids=None,
     existing_tags_path=None,
     selected_tag_paths=None,
     missing_only=False,
 ):
-    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Optional[Union[str, Path]], Optional[DnsmosConfig], Optional[FireRedAedConfig], Optional[DassNoiseTypeConfig], Optional[TopicConfig], Any, Optional[FireRedLidConfig], Optional[List[str]], Optional[Union[str, Path]], Optional[List[str]], bool) -> Dict[str, Any]
+    # type: (Union[str, Path], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Optional[Union[str, Path]], Optional[DnsmosConfig], Optional[FireRedAedConfig], Optional[DassNoiseTypeConfig], Optional[FireRedLidConfig], Optional[List[str]], Optional[Union[str, Path]], Optional[List[str]], bool) -> Dict[str, Any]
     manifest = Path(manifest_path)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -291,8 +287,6 @@ def run_manifest(
                         dnsmos_config=dnsmos_config,
                         firered_aed_config=firered_aed_config,
                         dass_config=dass_config,
-                        topic_config=topic_config,
-                        topic_client=topic_client,
                         firered_lid_config=firered_lid_config,
                         initial_tags=base_tags,
                         selected_tag_paths=row_tag_paths,
@@ -334,13 +328,11 @@ def tag_record(
     firered_aed_client=None,
     dass_config=None,
     dass_client=None,
-    topic_config=None,
-    topic_client=None,
     firered_lid_config=None,
     initial_tags=None,
     selected_tag_paths=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Any, Optional[Union[str, Path]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[DassNoiseTypeConfig], Any, Optional[TopicConfig], Any, Optional[FireRedLidConfig], Optional[Dict[str, Any]], Optional[List[str]]) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Any, Optional[Union[str, Path]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[DassNoiseTypeConfig], Any, Optional[FireRedLidConfig], Optional[Dict[str, Any]], Optional[List[str]]) -> Dict[str, Any]
     return _tag_record_internal(
         record,
         manifest_dir,
@@ -356,8 +348,6 @@ def tag_record(
         firered_aed_client=firered_aed_client,
         dass_config=dass_config,
         dass_client=dass_client,
-        topic_config=topic_config,
-        topic_client=topic_client,
         firered_lid_config=firered_lid_config,
         initial_tags=initial_tags,
         selected_tag_paths=selected_tag_paths,
@@ -381,13 +371,11 @@ def _tag_record_internal(
     firered_aed_client=None,
     dass_config=None,
     dass_client=None,
-    topic_config=None,
-    topic_client=None,
     firered_lid_config=None,
     initial_tags=None,
     selected_tag_paths=None,
 ):
-    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[DassNoiseTypeConfig], Any, Optional[TopicConfig], Any, Optional[FireRedLidConfig], Optional[Dict[str, Any]], Optional[List[str]]) -> Dict[str, Any]
+    # type: (Dict[str, Any], Union[str, Path], Optional[FireRedVadConfig], Optional[BrouhahaConfig], Optional[RecRirConfig], Optional[SpeakerEvidenceConfig], Any, Optional[Union[str, Path]], Optional[int], Optional[Dict[str, Any]], Optional[DnsmosConfig], Any, Optional[FireRedAedConfig], Any, Optional[DassNoiseTypeConfig], Any, Optional[FireRedLidConfig], Optional[Dict[str, Any]], Optional[List[str]]) -> Dict[str, Any]
     validate_input_record(record)
     sample = record["sample"]
     sample_id = sample["sample_id"]
@@ -400,7 +388,6 @@ def _tag_record_internal(
     has_input_transcript = _has_transcript(sample)
     language_content_stages = {
         STAGE_LANGUAGE_DETERMINISTIC,
-        STAGE_TOPIC,
         STAGE_FIRERED_LID,
     }
     speaker_asr_required = (
@@ -418,15 +405,13 @@ def _tag_record_internal(
     else:
         stages = _apply_no_transcript_speech_stage_guard(sample, tags, stages, warnings)
 
-        if STAGE_LANGUAGE_DETERMINISTIC in stages or STAGE_TOPIC in stages:
+        if STAGE_LANGUAGE_DETERMINISTIC in stages:
             _run_language_content_tools(
                 record,
                 tags,
                 internal_results,
                 warnings,
                 sample_id,
-                topic_config=topic_config,
-                topic_client=topic_client,
                 stages=stages,
             )
 
@@ -572,7 +557,6 @@ def _tag_record_internal(
             speaker_asr_transcript
             and (
                 STAGE_LANGUAGE_DETERMINISTIC in stages
-                or STAGE_TOPIC in stages
                 or deferred_firered_lid
             )
         ):
@@ -582,8 +566,6 @@ def _tag_record_internal(
                 internal_results,
                 warnings,
                 sample_id,
-                topic_config=topic_config,
-                topic_client=topic_client,
                 stages=stages,
                 transcript_override=speaker_asr_transcript,
                 include_language=deferred_firered_lid,
@@ -714,7 +696,7 @@ def _apply_no_transcript_speech_stage_guard(
         return stages
     skipped_stages = [STAGE_FIRERED_LID]
     if not allow_language_from_speaker_asr:
-        skipped_stages.extend([STAGE_LANGUAGE_DETERMINISTIC, STAGE_TOPIC])
+        skipped_stages.append(STAGE_LANGUAGE_DETERMINISTIC)
     skipped = stages & set(skipped_stages)
     if not skipped:
         return stages
@@ -954,14 +936,12 @@ def _run_language_content_tools(
     internal_results,
     warnings,
     sample_id,
-    topic_config=None,
-    topic_client=None,
     stages=None,
     transcript_override=None,
     include_language=False,
 ):
-    # type: (Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], str, Optional[TopicConfig], Any, Optional[set]) -> None
-    stages = stages or set([STAGE_LANGUAGE_DETERMINISTIC, STAGE_TOPIC])
+    # type: (Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], str, Optional[set], Optional[str], bool) -> None
+    stages = stages or set([STAGE_LANGUAGE_DETERMINISTIC])
     sample = record["sample"]
     transcript = (
         sample.get("text", {}).get("transcript", "")
@@ -1000,52 +980,6 @@ def _run_language_content_tools(
             )
             for field in ("word_count", "punctuation", "repetition", "filler"):
                 tags["language_content"][field] = None
-
-    config = topic_config or TopicConfig()
-    if STAGE_TOPIC not in stages or not config.enabled:
-        return
-    try:
-        topic_record = record
-        if transcript_override is not None:
-            topic_record = _record_with_transcript(record, transcript_override)
-        result = TOPIC_LANGUAGE_CONTENT_TOOL["run"](
-            topic_record,
-            context={},
-            config=config,
-            client=topic_client,
-        )
-        apply_result(tags, internal_results, result)
-        if result.status == "failed":
-            warnings.append(
-                {
-                    "type": "topic_tool_failed",
-                    "message": result.evidence.get("error", "topic tool failed"),
-                    "sample_id": sample_id,
-                    "tool_name": TOPIC_LANGUAGE_CONTENT_TOOL["tool_name"],
-                }
-            )
-    except Exception as exc:  # noqa: BLE001 - topic failures become internal warnings.
-        warnings.append(
-            {
-                "type": "topic_tool_error",
-                "message": str(exc),
-                "sample_id": sample_id,
-                "tool_name": TOPIC_LANGUAGE_CONTENT_TOOL["tool_name"],
-            }
-        )
-        tags["language_content"]["topic"] = None
-
-
-def _record_with_transcript(record, transcript):
-    # Keep the supplied record immutable while allowing topic to consume the
-    # speaker-v2 ASR transcript as its text input.
-    patched = dict(record)
-    sample = dict(record["sample"])
-    text = dict(sample["text"])
-    text["transcript"] = transcript
-    sample["text"] = text
-    patched["sample"] = sample
-    return patched
 
 
 def _run_firered_lid_tool(
@@ -1090,7 +1024,7 @@ def _run_speaker_tools(
     artifact_dir=None,
     artifact_record_index=None,
 ):
-    # type: (Path, Dict[str, Any], Union[str, Path], Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], str, Optional[SpeakerEvidenceConfig], Optional[Union[str, Path]], Optional[int]) -> None
+    # type: (Path, Dict[str, Any], Union[str, Path], Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], str, Optional[SpeakerEvidenceConfig], Optional[Union[str, Path]], Optional[int]) -> str
     duration_sec = tags["basic_acoustic"].get("duration_sec")
     if duration_sec is None or duration_sec <= 0:
         warnings.append(
@@ -1127,7 +1061,11 @@ def _run_speaker_tools(
         if not isinstance(speaker, dict):
             raise ValueError("speaker-v2 result is missing the public speaker object")
         missing_fields = sorted(
-            set(field for field in SPEAKER_FIELDS if field != "profiles")
+            set(
+                field
+                for field in SPEAKER_FIELDS
+                if field not in ("profiles", "speaker_present", "asr_transcript")
+            )
             - set(speaker)
         )
         if missing_fields:
@@ -1137,6 +1075,14 @@ def _run_speaker_tools(
             )
         for field in SPEAKER_FIELDS:
             tags["speaker"][field] = speaker.get(field)
+        asr_transcript = result.get("speaker_asr_transcript", "")
+        if not isinstance(asr_transcript, str):
+            asr_transcript = ""
+        asr_transcript = asr_transcript.strip()
+        tags["speaker"]["asr_transcript"] = asr_transcript or None
+        tags["speaker"]["speaker_present"] = _speaker_present_from_count(
+            tags["speaker"].get("speaker_count")
+        )
         internal_results.append(
             ToolResult(
                 tag_path="speaker",
@@ -1156,10 +1102,7 @@ def _run_speaker_tools(
                 },
             ).to_record()
         )
-        asr_transcript = result.get("speaker_asr_transcript", "")
-        if not isinstance(asr_transcript, str):
-            asr_transcript = ""
-        return asr_transcript.strip()
+        return asr_transcript
     except Exception as exc:  # noqa: BLE001 - speaker failures become internal warnings.
         warnings.append(
             {
@@ -1181,6 +1124,8 @@ def _null_speaker_tags(tags):
 
 def _set_no_transcript_speaker_tags(tags):
     tags["speaker"]["speaker_count"] = 0
+    tags["speaker"]["speaker_present"] = False
+    tags["speaker"]["asr_transcript"] = None
     tags["speaker"]["multi_speaker"] = False
     tags["speaker"]["speaker_change_count"] = 0
     tags["speaker"]["speaker_change"] = False
@@ -1990,6 +1935,29 @@ def audit_speaker(speaker):
             speaker[field] = None
             warnings.append({"type": "invalid_speaker_value", "field": field})
 
+    expected_speaker_present = _speaker_present_from_count(
+        speaker.get("speaker_count")
+    )
+    speaker_present = speaker.get("speaker_present")
+    if speaker_present is not None and (
+        not isinstance(speaker_present, bool)
+        or speaker_present != expected_speaker_present
+    ):
+        warnings.append(
+            {"type": "invalid_speaker_value", "field": "speaker_present"}
+        )
+    speaker["speaker_present"] = expected_speaker_present
+
+    asr_transcript = speaker.get("asr_transcript")
+    if asr_transcript is not None:
+        if not isinstance(asr_transcript, str) or not asr_transcript.strip():
+            speaker["asr_transcript"] = None
+            warnings.append(
+                {"type": "invalid_speaker_value", "field": "asr_transcript"}
+            )
+        else:
+            speaker["asr_transcript"] = asr_transcript.strip()
+
     overlap_ratio = speaker.get("overlap_ratio")
     if overlap_ratio is not None and (
         isinstance(overlap_ratio, bool)
@@ -2019,14 +1987,15 @@ def audit_speaker(speaker):
     return warnings
 
 
+def _speaker_present_from_count(speaker_count):
+    if not _is_non_negative_int(speaker_count):
+        return None
+    return speaker_count > 0
+
+
 def audit_language_content(language_content):
     # type: (Dict[str, Any]) -> List[Dict[str, Any]]
     warnings = []  # type: List[Dict[str, Any]]
-
-    topic = language_content.get("topic")
-    if topic is not None and not isinstance(topic, str):
-        language_content["topic"] = None
-        warnings.append({"type": "invalid_language_content_value", "field": "topic"})
 
     language = language_content.get("language")
     if language is not None and (not isinstance(language, str) or not language):
@@ -2162,7 +2131,8 @@ def build_arg_parser():
         default=None,
         help=(
             "Comma-separated tag paths, groups, or stage names to run, for "
-            "example speaker,language_content.topic,basic_acoustic.silence_ratio."
+            "example speaker.asr_transcript,language_content.word_count,"
+            "basic_acoustic.silence_ratio."
         ),
     )
     parser.add_argument(
@@ -2302,6 +2272,11 @@ def build_arg_parser():
         help="Python executable for DNSMOS subprocess. Defaults to local_config.py.",
     )
     parser.add_argument(
+        "--dnsmos-use-gpu",
+        action="store_true",
+        help="Use CUDAExecutionProvider for DNSMOS; fail instead of falling back to CPU.",
+    )
+    parser.add_argument(
         "--dnsmos-personalized",
         action="store_true",
         help="Use the personalized DNSMOS primary model. Defaults to regular DNSMOS.",
@@ -2316,85 +2291,6 @@ def build_arg_parser():
         "--speaker-v2-skip-model-verification",
         action="store_true",
         help="Skip pinned speaker-v2 model asset hash verification.",
-    )
-    parser.add_argument(
-        "--topic-enable",
-        action="store_true",
-        help="Enable OpenAI Responses topic classification for language_content.topic.",
-    )
-    parser.add_argument(
-        "--topic-provider",
-        default=None,
-        help="Topic provider name. Currently supports openai_responses.",
-    )
-    parser.add_argument(
-        "--topic-model",
-        default=None,
-        help="OpenAI Responses model for topic classification.",
-    )
-    parser.add_argument(
-        "--topic-base-url",
-        default=None,
-        help="OpenAI-compatible base URL. Defaults to local_config.py or OpenAI.",
-    )
-    parser.add_argument(
-        "--topic-api-key",
-        default=None,
-        help="OpenAI Responses API key. Prefer OPENAI_API_KEY or api.txt.",
-    )
-    parser.add_argument(
-        "--topic-api-key-path",
-        default=None,
-        help="Path to a file containing the OpenAI Responses API key.",
-    )
-    parser.add_argument(
-        "--topic-model-provider",
-        default=None,
-        help="Optional model provider section name in ~/.codex/config.toml.",
-    )
-    parser.add_argument(
-        "--topic-codex-config-path",
-        default=None,
-        help="Optional Codex TOML config path for OpenAI-compatible provider settings.",
-    )
-    parser.add_argument(
-        "--topic-timeout-sec",
-        type=int,
-        default=None,
-        help="OpenAI Responses timeout in seconds.",
-    )
-    parser.add_argument(
-        "--topic-temperature",
-        type=float,
-        default=None,
-        help="Optional temperature for OpenAI Responses topic classification.",
-    )
-    parser.add_argument(
-        "--topic-use-json-schema",
-        action="store_true",
-        default=None,
-        help="Request Responses JSON schema output instead of json_object.",
-    )
-    parser.add_argument(
-        "--topic-cache-disable",
-        action="store_true",
-        help="Disable JSONL cache for topic responses.",
-    )
-    parser.add_argument(
-        "--topic-cache-path",
-        default=None,
-        help="JSONL cache path for topic responses.",
-    )
-    parser.add_argument(
-        "--topic-fallback",
-        choices=["null", "heuristic", "error"],
-        default=None,
-        help="Topic behavior when the Responses call fails. Defaults to null.",
-    )
-    parser.add_argument(
-        "--topic-short-guard-disable",
-        action="store_true",
-        help="Disable deterministic short-utterance topic guard.",
     )
     parser.add_argument(
         "--artifact-dir",
@@ -2443,29 +2339,13 @@ def main(argv=None):
     dnsmos_config = DnsmosConfig(
         personalized=args.dnsmos_personalized,
         subprocess_python=args.dnsmos_python,
+        use_gpu=args.dnsmos_use_gpu,
     )
     speaker_config = default_speaker_evidence_config(
         profile_id=args.speaker_profile,
         vad_config=firered_vad_config,
         brouhaha_config=brouhaha_config,
         verify_model_assets=not args.speaker_v2_skip_model_verification,
-    )
-    topic_config = TopicConfig(
-        enabled=True if args.topic_enable else None,
-        provider=args.topic_provider,
-        model=args.topic_model,
-        base_url=args.topic_base_url,
-        api_key=args.topic_api_key,
-        api_key_path=args.topic_api_key_path,
-        model_provider=args.topic_model_provider,
-        codex_config_path=args.topic_codex_config_path,
-        timeout_sec=args.topic_timeout_sec,
-        temperature=args.topic_temperature,
-        use_json_schema=args.topic_use_json_schema,
-        cache_enabled=False if args.topic_cache_disable else None,
-        cache_path=args.topic_cache_path,
-        fallback=args.topic_fallback,
-        short_guard_enabled=False if args.topic_short_guard_disable else None,
     )
     summary = run_manifest(
         args.manifest,
@@ -2478,7 +2358,6 @@ def main(argv=None):
         dnsmos_config=dnsmos_config,
         firered_aed_config=firered_aed_config,
         dass_config=dass_config,
-        topic_config=topic_config,
         firered_lid_config=firered_lid_config,
         sample_ids=args.sample_id,
         existing_tags_path=args.input_tags,

@@ -101,9 +101,6 @@ def sample_note(tags):
     ]
     if nonempty:
         parts.append("组成: " + "/".join(nonempty))
-    topic = (tags.get("language_content") or {}).get("topic")
-    if topic:
-        parts.append(f"topic: {topic}")
     return " · ".join(parts)
 
 
@@ -162,9 +159,6 @@ def main():
 
     coverage = {group: group_covered(group) for group in PUBLIC_GROUPS}
     speaker_tags = [tags.get("speaker") or {} for tags in tag_rows]
-    topic_count = sum(
-        1 for tags in tag_rows if (tags.get("language_content") or {}).get("topic")
-    )
     speaker_count = sum(1 for tags in speaker_tags if tags.get("speaker_count") is not None)
     speaker_multi_count = sum(1 for tags in speaker_tags if tags.get("multi_speaker") is True)
 
@@ -180,7 +174,6 @@ def main():
         "rirArtifactCount": rir_artifact_count,
         "datasets": [{"name": name, "count": datasets[name]} for name in dataset_names],
         "coverage": coverage,
-        "topicCount": topic_count,
         "speakerCount": speaker_count,
         "speakerMultiCount": speaker_multi_count,
         "generatedFrom": {
@@ -198,7 +191,7 @@ def main():
     )
     print(
         f"wrote {out} ({len(samples)} samples, coverage {coverage}, "
-        f"topic {topic_count}, speaker {speaker_count}/{speaker_multi_count} multi)"
+        f"speaker {speaker_count}/{speaker_multi_count} multi)"
     )
 
 

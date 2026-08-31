@@ -61,10 +61,9 @@ Speaker metadata、Rec-RIR 等非公开中间结果会写到 `--artifact-dir`。
 | Stage | 输出 tag path |
 | --- | --- |
 | `language_deterministic` | `language_content.word_count`, `punctuation`, `repetition`, `filler` |
-| `topic` | `language_content.topic` |
 | `audio_probe` | `basic_acoustic.duration_sec`, `sample_rate_hz`, `channels` |
 | `silence` | `basic_acoustic.silence_segments`, `silence_ratio` |
-| `speaker` | `speaker.speaker_count`, `multi_speaker`, `speaker_change_count`, `speaker_change`, `overlap_ratio`, `speaker_overlap`, `profiles` |
+| `speaker` | `speaker.speaker_count`, `speaker_present`, `multi_speaker`, `speaker_change_count`, `speaker_change`, `overlap_ratio`, `speaker_overlap`, `profiles`, `asr_transcript` |
 | `brouhaha` | `audio_quality.snr_db`（C50 仅作为内部 evidence `internal.brouhaha_c50_db`） |
 | `dnsmos` | `audio_quality.dnsmos_sig`, `dnsmos_bak`, `dnsmos_ovrl`, `dnsmos_p808` |
 | `firered_aed` | `sound_field_scene.speech_music_events`, `music_present` |
@@ -81,7 +80,7 @@ evidence 用，不注册、不进入公开输出。
 
 ```bash
 --only-tags speaker
---only-tags language_content.topic,basic_acoustic.silence_ratio
+--only-tags speaker.asr_transcript,basic_acoustic.silence_ratio
 --only-tags recrir
 ```
 
@@ -97,7 +96,6 @@ ASR 文本；生成失败时才跳过依赖语言内容的 stage。其它音频�
 
 ```text
 language_deterministic
-topic
 firered_lid
 ```
 
@@ -107,11 +105,9 @@ firered_lid
 language_content.* = null  （仅在 speaker-v2 没有可用 ASR 时）
 ```
 
-`topic` 仍遵循默认关闭的配置；即使 ASR 可用，未启用 topic 时该字段也保持
-`null`。
-
-speaker-v2 ASR 只作为 language-content 的输入，不会把输入 transcript 传入
-speaker resolver。`audio_probe`、`silence`、
+speaker-v2 ASR 同时公开为 `speaker.asr_transcript` 并作为 language-content
+的 fallback 输入。它只来自 MOSS，不会把输入 transcript 传入 speaker
+resolver 或复制为该字段。`audio_probe`、`silence`、
 `speaker`、`brouhaha`、`dnsmos`、`firered_aed`、`dass` 和 `recrir` 仍可运行，
 因为它们可以用于纯噪声或无 transcript 音频的基础音频、声学、说话人和声场分析。
 
@@ -175,41 +171,19 @@ models/FireRedASR2S/examples_infer/lid/fireredlid
 language_content.language  （ISO 语言码或 zh-<region> 方言码，如 zh-xinan）
 ```
 
-### 5.2 Topic
+### 5.2 MOSS ASR 公共字段
 
-程序：
-
-```text
-tagger/tools/language_content/topic.py
-```
-
-模型/API：OpenAI-compatible Responses API。
-
-默认关闭，必须显式传入：
-
-```bash
---topic-enable
-```
-
-API key/model/base URL 来源优先级：
-
-1. 环境变量 `OPENAI_API_KEY`、`OPENAI_MODEL`、`OPENAI_BASE_URL`
-2. CLI 参数，例如 `--topic-api-key`、`--topic-model`
-3. `--topic-api-key-path`，默认是 `api.txt`
-4. `~/.codex/config.toml` 中 `--topic-model-provider` 指向的 provider
-
-topic 结果会写入 `language_content.topic`，格式为：
+MOSS 在 speaker stage 中对完整音频运行。Pipeline 从 MOSS 时间线中取所有
+有效 segment 文本，按 `start_sec` 排序后以空格拼接，输出：
 
 ```text
-major_topic/minor_topic
+speaker.asr_transcript
 ```
 
-短 utterance guard 会把 `yeah`、`ok`、`uh` 这类无主题短回应直接标成
-`other/insufficient_context`，不调用外部 API。API 响应默认缓存到：
-
-```text
-outputs/cache/topic_openai_responses_cache.jsonl
-```
+该字段不包含时间戳或 speaker ID，也不会使用 `sample.text.transcript` 补值。
+MOSS 失败、输出非法或没有有效文本时为 `null`。sure-tagger 不再注册
+`language_content.topic` 或 topic stage；开放描述性 topic 由下游语言模型
+基于确定性标签和这段 ASR 文本推断。
 
 ### 5.3 Audio Probe
 
@@ -298,21 +272,24 @@ SpeechBrain ECAPA
 Brouhaha
 ```
 
-公开输出固定为六字段加 `profiles` 画像数组：
+公开输出固定为七个标量字段、`profiles` 画像数组和 ASR 字符串，共九个字段：
 
 ```text
 speaker.speaker_count
+speaker.speaker_present
 speaker.multi_speaker
 speaker.speaker_change_count
 speaker.speaker_change
 speaker.overlap_ratio
 speaker.speaker_overlap
 speaker.profiles
+speaker.asr_transcript
 ```
 
+`speaker_present` 由已校验的 `speaker_count > 0` 确定性派生，不新增 claim。
 `profiles` 是 2026-08-26 起接入的确定性说话人画像（语速、音高档位、片段内
-相对音量），与六个 claim 使用同一 decision timeline，不引入新模型，失败或
-证据不足时独立为 `null`，不影响六字段。可通过
+相对音量），与 speaker claim 使用同一 decision timeline，不引入新模型，失败或
+证据不足时独立为 `null`，不影响其他字段。可通过
 `--speaker-profile-disable` 关闭画像计算。profile 计算与 `--speaker-profile`
 选择的模型组合无关。
 
@@ -550,12 +527,10 @@ C50。
 PYTHONPATH=. python3 scripts/run_tagger.py \
   --manifest phase2_asr_sample/manifest.jsonl \
   --input-tags outputs/phase2_full_pipeline_tags.jsonl \
-  --output outputs/phase2_plus_topic.jsonl \
-  --artifact-dir outputs/phase2_plus_topic_artifacts \
-  --only-tags language_content.topic \
-  --missing-only \
-  --topic-enable \
-  --topic-api-key-path api.txt
+  --output outputs/phase2_plus_asr.jsonl \
+  --artifact-dir outputs/phase2_plus_asr_artifacts \
+  --only-tags speaker.asr_transcript \
+  --missing-only
 ```
 
 关键规则：
@@ -575,8 +550,8 @@ tags，再运行本次指定的 stage。
 补标时推荐使用具体 tag path，而不是宽泛 group/stage。例如：
 
 ```bash
---only-tags language_content.topic
---only-tags speaker.speaker_count,speaker.multi_speaker,speaker.speaker_change_count,speaker.speaker_change,speaker.overlap_ratio,speaker.speaker_overlap,speaker.profiles
+--only-tags speaker.asr_transcript
+--only-tags speaker.speaker_count,speaker.speaker_present,speaker.multi_speaker,speaker.speaker_change_count,speaker.speaker_change,speaker.overlap_ratio,speaker.speaker_overlap,speaker.profiles,speaker.asr_transcript
 --only-tags basic_acoustic.silence_segments,basic_acoustic.silence_ratio
 ```
 
@@ -587,17 +562,17 @@ tags，再运行本次指定的 stage。
 一旦被调度，就可能重算并覆盖该 stage 负责的多个字段。例如：
 
 ```text
---only-tags language_content.topic
+--only-tags speaker.asr_transcript
 ```
 
-只会调度 topic stage，因此只影响 `language_content.topic`。
+会调度 speaker stage，因此也可能重算该 stage 负责的其它 `speaker.*` 字段。
 
 ```text
 --only-tags speaker.multi_speaker
 ```
 
 会调度 speaker stage；speaker stage 运行后可能同时写入
-全部六个 `speaker.*` 字段。如果旧结果中这些字段都为空，这通常是期望行为；
+全部九个 `speaker.*` 字段。如果旧结果中这些字段都为空，这通常是期望行为；
 如果只想严格保留同 stage 的其它旧字段，当前 pipeline 还没有字段级执行模式。
 
 如果补标 stage 需要依赖 duration/channels，而旧 tags 中没有这些值，
@@ -617,12 +592,10 @@ pipeline 会自动补跑 `audio_probe`。例如只补 `speaker.*` 时，如果
 PYTHONPATH=. python3 scripts/run_tagger.py \
   --manifest phase2_asr_sample/manifest.jsonl \
   --output outputs/phase2_full_tags.jsonl \
-  --artifact-dir outputs/phase2_artifacts \
-  --topic-enable \
-  --topic-api-key-path api.txt
+  --artifact-dir outputs/phase2_artifacts
 ```
 
-只跑 AMI 的 topic + metadata VAD + speaker smoke：
+只跑 AMI 的 metadata VAD + speaker smoke：
 
 ```bash
 PYTHONPATH=. python3 scripts/run_tagger.py \
@@ -632,22 +605,18 @@ PYTHONPATH=. python3 scripts/run_tagger.py \
   --sample-id EN2001a_utterance_00000 \
   --sample-id EN2001a_utterance_00001 \
   --sample-id EN2001a_utterance_00002 \
-  --only-tags language_content.topic,basic_acoustic.silence_ratio,speaker \
-  --topic-enable \
-  --topic-api-key-path api.txt
+  --only-tags basic_acoustic.silence_ratio,speaker
 ```
 
-给已有 phase2 结果只补 topic：
+给已有 phase2 结果只补 MOSS ASR：
 
 ```bash
 PYTHONPATH=. python3 scripts/run_tagger.py \
   --manifest phase2_asr_sample/manifest.jsonl \
   --input-tags outputs/phase2_full_pipeline_tags.jsonl \
-  --output outputs/phase2_topic_patch.jsonl \
-  --only-tags language_content.topic \
-  --missing-only \
-  --topic-enable \
-  --topic-api-key-path api.txt
+  --output outputs/phase2_asr_patch.jsonl \
+  --only-tags speaker.asr_transcript \
+  --missing-only
 ```
 
 给 AMI 样本只补 speaker：

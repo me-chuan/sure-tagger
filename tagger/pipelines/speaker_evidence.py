@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import threading
 import time
@@ -278,6 +279,9 @@ def default_speaker_evidence_config(
 ):
     """Build the shared speaker-v2 configuration used by the main pipeline."""
 
+    ecapa_python = os.environ.get(
+        "TAGGER_ECAPA_PYTHON", str(DEFAULT_ECAPA_PYTHON)
+    )
     return SpeakerEvidenceConfig(
         moss_config=MossDiarizeConfig(
             model=str(DEFAULT_MOSS_MODEL),
@@ -309,8 +313,8 @@ def default_speaker_evidence_config(
         ),
         ecapa_config=EcapaIdentityConfig(
             model_dir=str(DEFAULT_ECAPA_MODEL),
-            subprocess_python=str(DEFAULT_ECAPA_PYTHON),
-            device="cpu",
+            subprocess_python=ecapa_python,
+            device="cuda:0",
         ),
         brouhaha_config=brouhaha_config or BrouhahaConfig(),
         profile_id=profile_id,
@@ -942,33 +946,44 @@ def _speaker_asr_transcript(timelines):
         source = evidence.get("source", {})
         if source.get("name") != "moss_transcribe_diarize":
             continue
-        asr_transcript = evidence.get("payload", {}).get("asr_transcript", "")
+        payload = evidence.get("payload", {})
+        # This value is built directly from the original MOSS segments before
+        # the speaker timeline merges nearby turns for claim resolution.
+        asr_transcript = payload.get("asr_transcript", "")
         if isinstance(asr_transcript, str) and asr_transcript.strip():
             return asr_transcript.strip()
-        segments = (
-            evidence.get("payload", {})
-            .get("timeline_summary", {})
-            .get("segments", [])
-        )
+        # Fall back for older evidence that did not persist asr_transcript.
+        segments = payload.get("timeline_summary", {}).get("segments", [])
         text = _join_segment_text(segments)
         if text:
             return text
-        raw_text = evidence.get("payload", {}).get("model_output_text", "")
+        raw_text = payload.get("model_output_text", "")
         if isinstance(raw_text, str) and raw_text.strip():
             parsed_segments = parse_moss_text(raw_text)
             parsed_text = _join_segment_text(parsed_segments)
             if parsed_text:
                 return parsed_text
-            if not parsed_segments:
-                return raw_text.strip()
     return ""
 
 
 def _join_segment_text(segments):
+    indexed_segments = [
+        (index, segment)
+        for index, segment in enumerate(segments or [])
+        if (
+            isinstance(segment, dict)
+            and isinstance(segment.get("start_sec"), (int, float))
+            and not isinstance(segment.get("start_sec"), bool)
+            and isinstance(segment.get("text"), str)
+            and segment.get("text").strip()
+        )
+    ]
+    indexed_segments.sort(
+        key=lambda item: (item[1]["start_sec"], item[0])
+    )
     return " ".join(
         str(segment.get("text", "")).strip()
-        for segment in segments or []
-        if isinstance(segment, dict) and str(segment.get("text", "")).strip()
+        for _, segment in indexed_segments
     ).strip()
 
 

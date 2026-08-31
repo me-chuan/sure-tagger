@@ -1,7 +1,8 @@
-"""Sample-level ASR dataset tagging pipeline.
+"""Archived sample-level tagging pipeline retained as a source snapshot.
 
-Input records must match the closed raw-only schema in development.md. Public
-output is tags-only and contains only tag values.
+The active entry point is ``tagger.pipelines.tagging``. This module keeps the
+former topic and PANNs registrations locally so their removal from active
+registries does not change the archived source contract.
 """
 
 import argparse
@@ -33,10 +34,7 @@ from tagger.tools.room_acoustic.registry import (
     RECRIR_RIR_TOOL,
     RT60_TOOL,
 )
-from tagger.tools.sound_field_scene.registry import (
-    FIRERED_AED_TOOL,
-    PANNS_BACKGROUND_TOOL,
-)
+from tagger.tools.sound_field_scene.registry import FIRERED_AED_TOOL
 from tagger.tools.sound_field_scene.firered_aed_detector import (
     EVENT_NAMES,
     FireRedAedConfig,
@@ -45,6 +43,7 @@ from tagger.tools.sound_field_scene.panns_background_detector import (
     TOP_EVENTS_LIMIT,
     PannsBackgroundConfig,
 )
+from tagger.tools.sound_field_scene import panns_background_detector as legacy_panns
 from tagger.tools.room_acoustic.rir_estimator import (
     RecRirConfig,
     validate_rir_payload,
@@ -64,9 +63,22 @@ from tagger.tools.speaker.registry import (
 )
 from tagger.tools.language_content.registry import (
     DETERMINISTIC_LANGUAGE_CONTENT_TOOL,
-    TOPIC_LANGUAGE_CONTENT_TOOL,
 )
 from tagger.tools.language_content.topic import TopicConfig
+from tagger.tools.language_content import topic as legacy_topic
+
+
+TOPIC_LANGUAGE_CONTENT_TOOL = {
+    "tool_name": legacy_topic.TOOL_NAME,
+    "tag_path": "language_content.topic",
+    "run": legacy_topic.run,
+}
+
+PANNS_BACKGROUND_TOOL = {
+    "tool_name": legacy_panns.TOOL_NAME,
+    "tag_path": "sound_field_scene.sound",
+    "run": legacy_panns.run,
+}
 
 
 BASIC_ACOUSTIC_FIELDS = {

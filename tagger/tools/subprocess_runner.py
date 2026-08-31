@@ -27,6 +27,7 @@ class JsonSubprocessWorker:
         if env.get("PYTHONPATH"):
             pythonpath = pythonpath + os.pathsep + env["PYTHONPATH"]
         env["PYTHONPATH"] = pythonpath
+        _add_runtime_cuda_library_path(env, self.python_executable)
         self.process = subprocess.Popen(
             [
                 self.python_executable,
@@ -200,3 +201,48 @@ def _resolve_python_executable(python_executable):
     if candidate.exists():
         return str(candidate)
     return str(path)
+
+
+def _add_runtime_cuda_library_path(env, python_executable):
+    """Expose CUDA libraries shipped by the selected subprocess runtime.
+
+    Each model runtime carries its own CUDA/cuDNN wheel set.  Adding only the
+    libraries belonging to the selected executable avoids ABI conflicts between
+    the Python 3.10 and 3.11 environments used by the pipeline.
+    """
+    executable = Path(str(python_executable)).resolve()
+    runtime_root = executable.parent.parent
+    site_candidates = list(
+        (runtime_root / "lib").glob("python*/site-packages")
+    )
+    library_dirs = []
+    for site in site_candidates:
+        nvidia_root = site / "nvidia"
+        if nvidia_root.is_dir():
+            library_dirs.extend(
+                str(path)
+                for path in sorted(nvidia_root.glob("*/lib"))
+                if path.is_dir()
+            )
+        for pth in site.glob("*.pth"):
+            try:
+                candidates = [
+                    Path(line.strip())
+                    for line in pth.read_text().splitlines()
+                    if line.strip() and not line.lstrip().startswith("import ")
+                ]
+            except OSError:
+                continue
+            for external_site in candidates:
+                nvidia_root = external_site / "nvidia"
+                if nvidia_root.is_dir():
+                    library_dirs.extend(
+                        str(path)
+                        for path in sorted(nvidia_root.glob("*/lib"))
+                        if path.is_dir()
+                    )
+    if not library_dirs:
+        return
+    existing = env.get("LD_LIBRARY_PATH", "")
+    merged = library_dirs + ([existing] if existing else [])
+    env["LD_LIBRARY_PATH"] = os.pathsep.join(merged)

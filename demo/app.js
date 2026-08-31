@@ -150,7 +150,6 @@ function renderSampleList() {
       const transcriptState = hasTranscript(sample) ? "transcript" : "no transcript";
       const noise = sample.tags.sound_field_scene?.external_noise_type || [];
       const noiseState = noise.length ? `noise: ${formatNoiseTypes(noise)}` : "noise: none";
-      const topic = sample.tags.language_content?.topic;
       const speaker = sample.tags.speaker;
       const speakerState =
         speaker && speaker.speaker_count !== null && speaker.speaker_count !== undefined
@@ -166,7 +165,7 @@ function renderSampleList() {
             <span>${compactDataset(sample.dataset)}</span>
             <span>${formatDuration(sample.durationSec)}</span>
             <span>${transcriptState}</span>
-            <span>${topic ? `topic: ${topic}` : noiseState}</span>
+            <span>${noiseState}</span>
             <span>${speakerState}</span>
           </div>
         </button>
@@ -339,18 +338,20 @@ function getCardsForGroup(sample, group) {
       card("filler", lang.filler ?? "未生成", "um/uh/okay 等填充表达"),
       card("punctuation", punctuationValue(lang.punctuation), "标点统计", !lang.punctuation),
       card("repetition", repetitionValue(lang.repetition), "重复词统计", !lang.repetition),
-      card("topic", lang.topic ?? "未生成", "OpenAI Responses 层级 topic（默认关闭，--topic-enable 启用）", !lang.topic),
     ];
   }
 
   const speakerReady = speakerHasValues(speaker);
   return [
     card("speaker_count", speaker.speaker_count ?? "未生成", "解析出的说话人数（quality-shadow：Sortformer 主判）", !speakerReady),
+    card("speaker_present", speaker.speaker_present ?? "未生成", "由 speaker_count 确定性派生", speaker.speaker_present == null),
     card("multi_speaker", speaker.multi_speaker ?? "未生成", "是否包含两个或更多说话人", !speakerReady),
     card("speaker_change_count", speaker.speaker_change_count ?? "未生成", "说话人切换次数", !speakerReady),
     card("speaker_change", speaker.speaker_change ?? "未生成", "是否发生说话人切换", !speakerReady),
     card("overlap_ratio", formatPercent(speaker.overlap_ratio), "重叠发言时长 / 有效语音时长", speaker.overlap_ratio == null),
     card("speaker_overlap", speaker.speaker_overlap ?? "未生成", "是否多人同时发言（Pyannote 主判）", !speakerReady),
+    card("profiles", speaker.profiles ? JSON.stringify(speaker.profiles) : "未生成", "确定性说话人语速、相对音高和相对音量", speaker.profiles == null),
+    card("asr_transcript", speaker.asr_transcript ?? "未生成", "MOSS 全音频时间线文本，按时间顺序拼接", !speaker.asr_transcript),
   ];
 }
 

@@ -2,7 +2,6 @@
 
 from tagger.tools.language_content import deterministic
 from tagger.tools.language_content import firered_lid_detector
-from tagger.tools.language_content import topic
 
 
 DETERMINISTIC_LANGUAGE_CONTENT_TOOL = {
@@ -20,10 +19,4 @@ FIRERED_LID_LANGUAGE_CONTENT_TOOL = {
     "tool_name": firered_lid_detector.TOOL_NAME,
     "tag_path": "language_content.language",
     "run": firered_lid_detector.run,
-}
-
-TOPIC_LANGUAGE_CONTENT_TOOL = {
-    "tool_name": topic.TOOL_NAME,
-    "tag_path": "language_content.topic",
-    "run": topic.run,
 }

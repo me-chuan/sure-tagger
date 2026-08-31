@@ -1,4 +1,4 @@
-"""OpenAI Responses based topic classification."""
+"""Legacy OpenAI Responses topic classifier, unused by the active pipeline."""
 
 import json
 import os

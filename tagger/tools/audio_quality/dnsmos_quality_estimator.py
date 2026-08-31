@@ -53,6 +53,7 @@ class DnsmosConfig:
         personalized=False,
         model_version=None,
         subprocess_python=None,
+        use_gpu=False,
     ):
         configured_python = getattr(DNSMOS_PYTHON, "strip", lambda: "")()
         self.primary_model_path = _resolve_path(
@@ -66,6 +67,7 @@ class DnsmosConfig:
         )
         self.personalized = bool(personalized)
         self.model_version = model_version or DNSMOS_MODEL_VERSION
+        self.use_gpu = bool(use_gpu)
         self.subprocess_python = (
             configured_python if subprocess_python is None else subprocess_python
         )
@@ -83,6 +85,7 @@ class DnsmosConfig:
             self.personalized,
             self.model_version,
             self.subprocess_python,
+            self.use_gpu,
         )
 
     def to_record(self):
@@ -91,6 +94,7 @@ class DnsmosConfig:
             "p808_model_path": self.p808_model_path,
             "personalized": self.personalized,
             "model_version": self.model_version,
+            "use_gpu": self.use_gpu,
             "sampling_rate_hz": SAMPLING_RATE_HZ,
             "input_length_sec": INPUT_LENGTH_SEC,
             "subprocess_python": self.subprocess_python,
@@ -210,13 +214,34 @@ class DnsmosClient:
                 "onnxruntime is not importable in the DNSMOS Python environment"
             ) from exc
 
+        if self.config.use_gpu:
+            available = ort.get_available_providers()
+            if "CUDAExecutionProvider" not in available:
+                raise DnsmosError(
+                    "DNSMOS GPU mode requested but CUDAExecutionProvider is unavailable; "
+                    "refusing CPU fallback (available: %s)" % available
+                )
+            providers = ["CUDAExecutionProvider"]
+        else:
+            providers = ["CPUExecutionProvider"]
         try:
             self._primary_session = ort.InferenceSession(
-                str(primary_path), providers=["CPUExecutionProvider"]
+                str(primary_path), providers=providers
             )
             self._p808_session = ort.InferenceSession(
-                str(p808_path), providers=["CPUExecutionProvider"]
+                str(p808_path), providers=providers
             )
+            if self.config.use_gpu:
+                for name, session in (
+                    ("primary", self._primary_session),
+                    ("P.808", self._p808_session),
+                ):
+                    active = tuple(session.get_providers())
+                    if "CUDAExecutionProvider" not in active:
+                        raise DnsmosError(
+                            "DNSMOS %s session did not activate CUDAExecutionProvider: %s"
+                            % (name, active)
+                        )
         except Exception as exc:  # noqa: BLE001 - normalized to a tool error.
             raise DnsmosError("DNSMOS model loading failed") from exc
         return self._primary_session, self._p808_session
@@ -264,6 +289,7 @@ def _subprocess_config(config):
         "personalized_model_path": config.personalized_model_path,
         "personalized": config.personalized,
         "model_version": config.model_version,
+        "use_gpu": config.use_gpu,
         "subprocess_python": "",
     }
 

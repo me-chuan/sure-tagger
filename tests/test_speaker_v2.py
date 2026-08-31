@@ -10,6 +10,7 @@ import wave
 from tagger.pipelines.speaker_evidence import (
     SpeakerEvidenceConfig,
     _speaker_asr_transcript,
+    collect_moss_evidence,
     collect_pyannote_evidence,
     collect_sortformer_evidence,
     collect_whisper_evidence,
@@ -75,6 +76,105 @@ class SpeakerV2Test(unittest.TestCase):
                     ]
                 },
                 "model_output_text": "[0.00][S01][10.88]",
+            },
+        }
+
+        self.assertEqual(_speaker_asr_transcript([evidence]), "")
+
+    def test_speaker_asr_transcript_joins_moss_segments_in_time_order(self):
+        evidence = {
+            "source": {"name": "moss_transcribe_diarize"},
+            "payload": {
+                "asr_transcript": "first second third",
+                "timeline_summary": {
+                    "segments": [
+                        {"start_sec": 0.0, "text": "merged speaker timeline"},
+                    ]
+                },
+            },
+        }
+
+        self.assertEqual(
+            _speaker_asr_transcript([evidence]),
+            "first second third",
+        )
+
+    def test_collect_moss_evidence_builds_asr_in_segment_time_order(self):
+        moss_result = ToolResult(
+            "speaker.diarization_timeline",
+            {
+                "segments": [
+                    {
+                        "start_sec": 2.0,
+                        "end_sec": 3.0,
+                        "speaker_id": "S01",
+                        "text": "third",
+                    },
+                    {
+                        "start_sec": 0.0,
+                        "end_sec": 1.0,
+                        "speaker_id": "S01",
+                        "text": " first ",
+                    },
+                    {
+                        "start_sec": 1.0,
+                        "end_sec": 2.0,
+                        "speaker_id": "S02",
+                        "text": "second",
+                    },
+                    {
+                        "start_sec": 0.5,
+                        "end_sec": 0.75,
+                        "speaker_id": "S03",
+                        "text": None,
+                    },
+                    {
+                        "start_sec": 2.5,
+                        "end_sec": 2.75,
+                        "speaker_id": "S03",
+                        "text": 42,
+                    },
+                    {
+                        "end_sec": 2.75,
+                        "speaker_id": "S03",
+                        "text": "missing start",
+                    },
+                ],
+                "raw_text": "",
+            },
+            "moss",
+            "fake",
+        )
+        scope = {
+            "sample_id": "sample",
+            "duration_sec": 3.0,
+            "audio_path": "/audio.wav",
+            "audio_sha256": "audio",
+            "sample_rate_hz": 16000,
+            "channels": 1,
+        }
+        with mock.patch(
+            "tagger.pipelines.speaker_evidence.run_moss_diarizer",
+            return_value=moss_result,
+        ):
+            evidence = collect_moss_evidence(
+                scope,
+                MossDiarizeConfig(model="fake"),
+                verify_model_asset=False,
+            )
+
+        self.assertEqual(
+            evidence["payload"]["asr_transcript"],
+            "first second third",
+        )
+
+    def test_speaker_asr_transcript_rejects_unparsed_raw_moss_output(self):
+        evidence = {
+            "source": {"name": "moss_transcribe_diarize"},
+            "payload": {
+                "asr_transcript": "",
+                "timeline_summary": {"segments": []},
+                "model_output_text": "malformed response without a timeline",
             },
         }
 
@@ -705,7 +805,7 @@ class SpeakerV2Test(unittest.TestCase):
                 "/audio.wav", context={}
             )
         self.assertEqual(result, expected)
-        request = runner.call_args.args[2]
+        request = runner.call_args[0][2]
         self.assertNotIn("token", request["config"])
         self.assertNotIn("timeout_sec", request["config"])
 

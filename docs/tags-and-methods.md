@@ -29,26 +29,6 @@ CUDA_VISIBLE_DEVICES=0 python3 scripts/run_tagger.py \
 FireRed 和 Brouhaha 环境使用 CPU 版 PyTorch，因此运行示例没有传入它们的
 GPU 参数。
 
-可选启用 topic 标签：
-
-```bash
-python3 scripts/run_tagger.py \
-  --manifest phase1_asr_samples/manifest.jsonl \
-  --output phase1_asr_samples/outputs/full_pipeline_tags.jsonl \
-  --topic-enable \
-  --topic-model gpt-5.5 \
-  --topic-api-key-path api.txt
-```
-
-`api.txt` 已在 `.gitignore` 中。也可以用 `OPENAI_API_KEY`、
-`OPENAI_MODEL`、`OPENAI_BASE_URL` 或 `tagger/local_config.py` 配置。读取
-OpenAI key 的优先级是：
-
-1. `OPENAI_API_KEY`
-2. `--topic-api-key`
-3. `--topic-api-key-path` 或默认 `api.txt`
-4. `~/.codex/config.toml` 中 `--topic-model-provider` 指向 provider 的 env
-
 只跑某一个样本的完整链路：
 
 ```bash
@@ -65,16 +45,14 @@ python3 scripts/run_tagger.py \
 python3 scripts/run_tagger.py \
   --manifest phase2_asr_sample/manifest.jsonl \
   --input-tags outputs/phase2_full_pipeline_tags.jsonl \
-  --output outputs/phase2_topic_patch.jsonl \
+  --output outputs/phase2_asr_patch.jsonl \
   --sample-id EN2001a_utterance_00000 \
-  --only-tags language_content.topic \
-  --topic-enable \
-  --topic-model gpt-5.5 \
-  --topic-api-key-path api.txt
+  --only-tags speaker.asr_transcript \
+  --missing-only
 ```
 
 `--only-tags` 支持公开 tag path、分组名或 stage 名，例如 `speaker`、
-`basic_acoustic.silence_ratio`、`language_content.topic`、`recrir`。配合
+`basic_acoustic.silence_ratio`、`speaker.asr_transcript`、`recrir`。配合
 `--missing-only` 时，已有非空字段不会被覆盖。
 
 ## 2. 输入 JSONL
@@ -112,9 +90,9 @@ manifest 每行是一个封闭的 raw-only JSON 对象。例如：
 ## 3. 当前可打标签
 
 当前 tagging pipeline 定义了 31 个公开字段。`room_acoustic.far_field`
-仍是预留字段，暂时输出 `null`。`language_content.topic` 已接入可选的
-OpenAI Responses 实现，但默认关闭；未启用、配置缺失或调用失败时输出
-`null`。
+仍是预留字段，暂时输出 `null`。sure-tagger 不再公开 topic；下游语言模型
+可基于确定性标签和 `speaker.asr_transcript` 推断一个不限定值域的描述性
+`topic` 短语。
 
 ### 3.1 基础声学标签
 
@@ -194,12 +172,14 @@ FireRed AED 的 `music_present` 门控——AED 判定无音乐时音乐桶为�
 | Tag | 类型 | 打标方法 | 含义 |
 | --- | --- | --- | --- |
 | `speaker.speaker_count` | non-negative integer | speaker v2 的 count claim；`quality-shadow` 以 Sortformer 为主、MOSS 为 fallback | 样本内解析出的说话人数。 |
+| `speaker.speaker_present` | boolean | 从已校验的 `speaker_count` 确定性派生 | 是否存在说话人；人数大于 0 为 `true`，等于 0 为 `false`，人数未知时为 `null`。 |
 | `speaker.multi_speaker` | boolean | speaker v2 的 multi-speaker claim；Sortformer 主判，MOSS 作 guard | 是否包含两个或更多不同说话人。 |
 | `speaker.speaker_change_count` | non-negative integer | 从 speaker v2 为 change claim 选中的 timeline 派生 | 样本内说话人切换次数。 |
 | `speaker.speaker_change` | boolean | speaker v2 的 change claim；`quality-shadow` 以 MOSS 为主、Sortformer 为 guard/fallback | 是否发生说话人切换。 |
 | `speaker.overlap_ratio` | number / `[0, 1]` | 从 speaker v2 为 overlap claim 选中的 timeline 派生，分母为 speech union duration | 重叠发言时长占有效语音时长的比例。 |
 | `speaker.speaker_overlap` | boolean | speaker v2 的 overlap claim；Pyannote 主判，Sortformer/MOSS 作 witness 或 fallback | 是否存在多人同时发言。 |
 | `speaker.profiles` | array of object / nullable | speaker v2 的确定性画像（2026-08-26 起，复用 decision timeline、MOSS 文本和 VAD，无新模型） | 每个说话人的语言感知语速、相对音高档位和片段内相对音量。每项为 `speaker_id`（`speaker_1`、`speaker_2`…）、`speech_rate`（`band` 取 `slow`/`normal`/`fast`/`variable`、`value`、`unit` 取 `zh_char_per_sec`/`word_per_min`；`unit` 未知时 `value` 为 `null`）、`pitch`（`low`/`mid`/`high`/`variable`，相对 F0 档位，不映射性别）、`speaker_volume`（`low`/`normal`/`loud`/`variable`，仅同片段内相对响度）。语速为首版重点：中文按有效汉字/秒，拉丁语系按词/分钟，重叠区间、静音和无 speech coverage 的区间不参与汇总，累计有效语音不足 3 秒或文本单位不足 8 时该说话人语速为 `null`。无法得到可靠时间轴时为 `null`，确认没有语音时为 `[]`。不推断年龄、性别、情绪或口音；原始 F0/RMS/区间只进内部 artifact。 |
+| `speaker.asr_transcript` | string / nullable | MOSS 全音频时间线 segment 文本按 `start_sec` 排序后拼接 | 整段音频的上游 ASR 文本；去除首尾空白，不含时间戳和 speaker ID。只来自 MOSS，绝不以 `sample.text.transcript` 补值；MOSS 无有效文本或失败时为 `null`。 |
 
 总线直接调用 `tagger/pipelines/speaker_evidence.py`，默认 profile 是
 `quality-shadow`，不再读取 native metadata 生成 speaker 公开值，也不存在旧的
@@ -210,21 +190,16 @@ artifact，不进入公开 tags-only 输出。
 ### 3.6 语言内容标签
 
 这些标签优先读取 `sample.text.transcript`。当输入 transcript 为空且需要文本
-标签时，pipeline 会使用 speaker-v2 的联合 ASR（MOSS）输出作为替代文本；除
-topic 外，其余文本字段都是确定性规则。
+标签时，pipeline 会使用 `speaker.asr_transcript` 作为替代文本。这里不包含
+描述性 topic；topic 由 sure-tagger 下游语言模型生成开放短语。
 
 | Tag | 类型 | 打标方法 | 含义 |
 | --- | --- | --- | --- |
-| `language_content.topic` | string | OpenAI-compatible Responses API，可选启用 | 转写文本的层级主题，公开值形如 `major_topic/minor_topic`；置信度、关键词和理由只保存在内部 evidence。 |
 | `language_content.language` | string | 非空 transcript：FireRed LID 音频模型；空 transcript：speaker-v2 ASR + Unicode heuristic | 非空文本沿用音频语言/方言识别；空文本使用 speaker-v2 ASR 文本识别语言。 |
 | `language_content.word_count` | integer | simple multilingual tokenizer | transcript 中的词数。 |
 | `language_content.punctuation` | object | Unicode punctuation counter | `punctuation_count` 和 `has_terminal_punctuation`。 |
 | `language_content.repetition` | object | consecutive token ngram rule | `has_repetition` 和 `repetition_count`。 |
 | `language_content.filler` | integer | filler lexicon rule | filler token 数量。 |
-
-topic 短 utterance guard 会把 `yeah`、`ok`、`uh` 这类缺少主题信息的短回应
-直接标为 `other/insufficient_context`，不发起外部 API 调用。当前 topic
-接入不使用额外上下文增强。
 
 ## 4. 模型输入预处理
 
@@ -242,7 +217,6 @@ transcript；为空时读取 speaker-v2 ASR，不额外处理音频。
 | Rec-RIR | 16 kHz、单通道 | torchaudio 对多通道取均值并重采样，临时 WAV 推理后删除。 |
 | Speaker v2 | 各模型适配器要求的单通道采样率 | MOSS、Sortformer、Pyannote、ECAPA、FireRed VAD 和 Brouhaha 分别在适配器内完成解码、降混与重采样，再按 profile 融合 claim。 |
 | 确定性语言内容 | 原始 transcript，或 transcript 为空时的 speaker-v2 ASR | 不做音频预处理；直接对文本 tokenize 和统计；空 transcript 时语言字段也使用同一 ASR 文本。 |
-| Topic | 原始 transcript，或 transcript 为空时的 speaker-v2 ASR | 不做音频预处理；启用时将文本和空上下文封装成 JSON prompt 发送到 OpenAI-compatible Responses API。 |
 
 因此 8 kHz 或双通道音频可以正常进入模型。需要注意，8 kHz 上采样只能
 满足模型输入格式，无法恢复原音频 4 kHz 以上已经不存在的频率信息；多通道
@@ -298,15 +272,16 @@ warning 或推理证据。
   },
   "speaker": {
     "speaker_count": null,
+    "speaker_present": null,
     "multi_speaker": null,
     "speaker_change_count": null,
     "speaker_change": null,
     "overlap_ratio": null,
     "speaker_overlap": null,
-    "profiles": null
+    "profiles": null,
+    "asr_transcript": "Good morning. Let us begin the meeting."
   },
   "language_content": {
-    "topic": null,
     "language": "en",
     "word_count": 12,
     "punctuation": {

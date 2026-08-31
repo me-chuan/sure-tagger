@@ -2,8 +2,7 @@
 
 Language-content tools run inside the root tagging pipeline. Deterministic tools
 use `sample.text.transcript`, or the speaker-v2 MOSS ASR transcript when the input
-text is empty; topic classification is optional and uses
-an OpenAI-compatible Responses API when enabled.
+text is empty.
 
 Implemented fields:
 
@@ -14,38 +13,14 @@ Implemented fields:
 - `language_content.repetition`: consecutive repeated word/ngram detection.
 - `language_content.filler`: lexicon count for fillers such as `uh`, `um`, `hmm`,
   and `yeah`.
-- `language_content.topic`: optional hierarchical topic label as
-  `major_topic/minor_topic`.
 
-Topic classification is disabled by default so normal pipeline runs do not make
-external API calls. Enable it with:
+The MOSS transcript is published separately as
+`speaker.asr_transcript`. It is built from MOSS timeline segment text in time
+order, without timestamps or speaker IDs, and is `null` when MOSS has no valid
+text. A non-empty `sample.text.transcript` is still the preferred input for the
+five language-content fields, but it never populates `speaker.asr_transcript`.
 
-```bash
-python3 scripts/run_tagger.py \
-  --manifest path/to/manifest.jsonl \
-  --output outputs/tags.jsonl \
-  --topic-enable \
-  --topic-model gpt-5.5 \
-  --topic-api-key-path api.txt
-```
-
-Provider settings can also come from `OPENAI_API_KEY`, `OPENAI_MODEL`,
-`OPENAI_BASE_URL`, `tagger/local_config.py`, or `~/.codex/config.toml` when
-`--topic-model-provider` is set. `api.txt` is git-ignored.
-
-API key lookup order:
-
-1. `OPENAI_API_KEY`
-2. `--topic-api-key`
-3. `--topic-api-key-path`, defaulting to `api.txt`
-4. selected provider env in `~/.codex/config.toml`
-
-The public topic value is a string such as
-`technology_engineering/artificial_intelligence`. Model confidence, keywords,
-proper nouns, prompt version, taxonomy version, and failure details are kept only
-in internal tool evidence. Short non-content utterances such as `yeah` are
-guarded deterministically as `other/insufficient_context` without an API call.
-
-The language-content tool functions themselves do not need audio files. For an
-empty transcript, the root pipeline first invokes speaker-v2 to obtain the ASR
-fallback text; only the optional topic tool needs external API access.
+`language_content.topic` is not registered or emitted by sure-tagger. Topic is
+an open descriptive phrase inferred by the downstream language model from the
+deterministic tags and ASR text; it has no fixed taxonomy in this layer. The
+legacy `topic.py` module remains only for historical pipeline reproducibility.

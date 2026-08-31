@@ -12,6 +12,7 @@ from scripts.run_c50_method_comparison import compare_record as compare_c50_reco
 from tagger.input_schema import InputSchemaError, validate_input_record
 from tagger.pipelines.tagging import (
     FULL_STAGES,
+    _merge_tags,
     _stages_for_tag_paths,
     audit_audio_quality,
     audit_basic_acoustic,
@@ -44,7 +45,6 @@ from tagger.tools.basic_acoustic.firered_vad_silence_detector import (
     validate_silence_segments,
 )
 from tagger.tools.basic_acoustic.silence_ratio_calculator import run as run_silence_ratio
-from tagger.tools.language_content.topic import TopicConfig, validate_payload
 from tagger.tools.room_acoustic.c50_estimator import (
     run as run_c50_estimator,
 )
@@ -92,6 +92,7 @@ class AcousticToolsTest(unittest.TestCase):
             return_value={
                 "speaker": {
                     "speaker_count": 1,
+                    "speaker_present": True,
                     "multi_speaker": False,
                     "speaker_change_count": 0,
                     "speaker_change": False,
@@ -279,7 +280,10 @@ class AcousticToolsTest(unittest.TestCase):
 
             tags = tag_sample_record(record, tmpdir)
 
-            self.assertIsNone(tags["language_content"]["topic"])
+            self.assertEqual(
+                set(tags["language_content"]),
+                {"language", "word_count", "punctuation", "repetition", "filler"},
+            )
             # language_content.language now comes from FireRed LID, an
             # audio-dependent stage; without audio it stays null.
             self.assertIsNone(tags["language_content"]["language"])
@@ -309,25 +313,15 @@ class AcousticToolsTest(unittest.TestCase):
             asr_text = "Um hello hello."
             public_speaker = {
                 "speaker_count": 1,
+                "speaker_present": True,
                 "multi_speaker": False,
                 "speaker_change_count": 0,
                 "speaker_change": False,
                 "overlap_ratio": 0.0,
                 "speaker_overlap": False,
                 "profiles": None,
+                "asr_transcript": None,
             }
-            topic_client = FakeTopicClient(
-                {
-                    "major_topic": "daily_life_social",
-                    "minor_topic": "small_talk",
-                    "confidence": 0.8,
-                    "topic_keywords": ["hello"],
-                    "proper_nouns": [],
-                    "reason_short": "The speaker ASR is a greeting.",
-                    "secondary_topics": [],
-                }
-            )
-
             with mock.patch(
                 "tagger.pipelines.tagging.run_speaker_v2_record",
                 return_value={
@@ -344,8 +338,6 @@ class AcousticToolsTest(unittest.TestCase):
                     record,
                     tmpdir,
                     speaker_config=object(),
-                    topic_config=TopicConfig(enabled=True, cache_enabled=False),
-                    topic_client=topic_client,
                     selected_tag_paths=["language_content"],
                 )
 
@@ -358,8 +350,7 @@ class AcousticToolsTest(unittest.TestCase):
                 {"punctuation_count": 1, "has_terminal_punctuation": True},
             )
             self.assertTrue(tags["language_content"]["repetition"]["has_repetition"])
-            self.assertEqual(topic_client.call_count, 1)
-            self.assertIn(asr_text, topic_client.prompts[0])
+            self.assertEqual(tags["speaker"]["asr_transcript"], asr_text)
 
     def test_empty_transcript_language_tag_uses_speaker_asr(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -373,6 +364,7 @@ class AcousticToolsTest(unittest.TestCase):
                 return_value={
                     "speaker": {
                         "speaker_count": 1,
+                        "speaker_present": True,
                         "multi_speaker": False,
                         "speaker_change_count": 0,
                         "speaker_change": False,
@@ -405,7 +397,7 @@ class AcousticToolsTest(unittest.TestCase):
             }
             speaker_config = object()
             artifact_dir = Path(tmpdir) / "custom-artifacts"
-            public_speaker = {
+            speaker_v2_output = {
                 "speaker_count": 2,
                 "multi_speaker": True,
                 "speaker_change_count": 3,
@@ -426,7 +418,8 @@ class AcousticToolsTest(unittest.TestCase):
                 ],
             }
             result = {
-                "speaker": public_speaker,
+                "speaker": speaker_v2_output,
+                "speaker_asr_transcript": "  MOSS full sample transcript.  ",
                 "run_profile": "quality-shadow",
                 "policy_version": "policy-v1",
                 "policy_hash": "hash",
@@ -446,7 +439,12 @@ class AcousticToolsTest(unittest.TestCase):
                     selected_tag_paths=["speaker"],
                 )
 
-            self.assertEqual(tags["speaker"], public_speaker)
+            expected_speaker = dict(
+                speaker_v2_output,
+                speaker_present=True,
+                asr_transcript="MOSS full sample transcript.",
+            )
+            self.assertEqual(tags["speaker"], expected_speaker)
             args, kwargs = run_speaker.call_args
             self.assertIs(args[0], record)
             self.assertEqual(Path(args[1]), Path(tmpdir))
@@ -455,123 +453,6 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertIsInstance(kwargs["context"], dict)
             self.assertEqual(kwargs["artifact_root"], artifact_dir)
             self.assertTrue(kwargs["artifact_sample_id"].endswith("sample-1"))
-
-    def test_tagging_record_populates_openai_responses_topic_when_enabled(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            record = make_record("missing.wav")
-            record["sample"]["text"]["transcript"] = (
-                "We discuss ASR dataset tagging and automatic annotation quality."
-            )
-            client = FakeTopicClient(
-                {
-                    "major_topic": "technology_engineering",
-                    "minor_topic": "artificial_intelligence",
-                    "confidence": 0.82,
-                    "topic_keywords": ["ASR", "dataset", "tagging"],
-                    "proper_nouns": [],
-                    "reason_short": "The transcript discusses ASR annotation.",
-                    "secondary_topics": [],
-                }
-            )
-
-            tags = tag_sample_record(
-                record,
-                tmpdir,
-                topic_config=TopicConfig(enabled=True, cache_enabled=False),
-                topic_client=client,
-            )
-
-            self.assertEqual(
-                tags["language_content"]["topic"],
-                "technology_engineering/artificial_intelligence",
-            )
-            self.assertEqual(client.call_count, 1)
-
-    def test_topic_prompt_ignores_sample_utterance_metadata(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            transcript = (
-                "We compare whether the NITE XML interface is compatible with "
-                "the current meeting annotation workflow."
-            )
-            base_record = make_record("missing.wav")
-            base_record["sample"]["text"]["transcript"] = transcript
-            base_record["sample"]["native_metadata"] = {}
-            annotated_record = json.loads(json.dumps(base_record))
-            annotated_record["sample"]["native_metadata"] = {
-                "utterances": [
-                    {
-                        "speaker": "E",
-                        "start": 0.0,
-                        "end": 4.0,
-                        "text": transcript,
-                    },
-                    {
-                        "speaker": "A",
-                        "start": 2.0,
-                        "end": 2.3,
-                        "text": "Yeah.",
-                    },
-                ]
-            }
-            output = {
-                "major_topic": "technology_engineering",
-                "minor_topic": "software_engineering",
-                "confidence": 0.82,
-                "topic_keywords": ["NITE XML", "interface"],
-                "proper_nouns": ["NITE XML"],
-                "reason_short": "The transcript discusses interface compatibility.",
-                "secondary_topics": [],
-            }
-
-            clients = []
-            for record in (base_record, annotated_record):
-                client = FakeTopicClient(output)
-                tag_sample_record(
-                    record,
-                    tmpdir,
-                    topic_config=TopicConfig(enabled=True, cache_enabled=False),
-                    topic_client=client,
-                    selected_tag_paths=["language_content.topic"],
-                )
-                clients.append(client)
-
-            plain_prompt = json.loads(clients[0].prompts[0])
-            annotated_prompt = json.loads(clients[1].prompts[0])
-            self.assertEqual(plain_prompt, annotated_prompt)
-            self.assertEqual(plain_prompt["context"]["target_granularity"], "sample")
-            self.assertNotIn(
-                "Do not borrow a substantive topic",
-                "\n".join(plain_prompt["rules"]),
-            )
-
-    def test_topic_short_utterance_guard_skips_openai_responses_call(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            record = make_record("missing.wav")
-            record["sample"]["text"]["transcript"] = "Yeah."
-            client = FakeTopicClient(
-                {
-                    "major_topic": "technology_engineering",
-                    "minor_topic": "artificial_intelligence",
-                    "confidence": 0.82,
-                    "topic_keywords": [],
-                    "proper_nouns": [],
-                    "reason_short": "Should not be called.",
-                    "secondary_topics": [],
-                }
-            )
-
-            tags = tag_sample_record(
-                record,
-                tmpdir,
-                topic_config=TopicConfig(enabled=True, cache_enabled=False),
-                topic_client=client,
-            )
-
-            self.assertEqual(
-                tags["language_content"]["topic"],
-                "other/insufficient_context",
-            )
-            self.assertEqual(client.call_count, 0)
 
     def test_tagging_pipeline_skips_only_language_stages_without_transcript(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -582,17 +463,6 @@ class AcousticToolsTest(unittest.TestCase):
             record["sample"]["native_metadata"]["speech_segments"] = [
                 {"start_sec": 0.5, "end_sec": 1.5}
             ]
-            topic_client = FakeTopicClient(
-                {
-                    "major_topic": "daily_life_social",
-                    "minor_topic": "small_talk",
-                    "confidence": 0.8,
-                    "topic_keywords": [],
-                    "proper_nouns": [],
-                    "reason_short": "Should not be called.",
-                    "secondary_topics": [],
-                }
-            )
             dnsmos_client = FakeDnsmosClient(
                 {
                     "sig": 3.0,
@@ -613,8 +483,6 @@ class AcousticToolsTest(unittest.TestCase):
                 tmpdir,
                 dnsmos_client=dnsmos_client,
                 recrir_client=recrir_client,
-                topic_config=TopicConfig(enabled=True, cache_enabled=False),
-                topic_client=topic_client,
                 selected_tag_paths=[
                     "language_content",
                     "basic_acoustic.silence_ratio",
@@ -625,7 +493,6 @@ class AcousticToolsTest(unittest.TestCase):
                 **missing_external_model_configs(tmpdir)
             )
 
-            self.assertEqual(topic_client.call_count, 0)
             self.assertEqual(dnsmos_client.call_count, 1)
             self.assertEqual(recrir_client.call_count, 1)
             self.assertTrue(all(value is None for value in tags["language_content"].values()))
@@ -639,23 +506,8 @@ class AcousticToolsTest(unittest.TestCase):
             self.assertEqual(tags["basic_acoustic"]["silence_ratio"], 0.5)
             self.assertEqual(tags["audio_quality"]["dnsmos_ovrl"], 3.0)
             self.assertEqual(tags["speaker"]["speaker_count"], 1)
+            self.assertTrue(tags["speaker"]["speaker_present"])
             self.assertFalse(tags["speaker"]["multi_speaker"])
-
-    def test_topic_validation_repairs_known_minor_under_wrong_major(self):
-        payload = {
-            "major_topic": "meeting_workflow",
-            "minor_topic": "project_management",
-            "confidence": 0.92,
-            "topic_keywords": ["prototype", "week six"],
-            "proper_nouns": [],
-            "reason_short": "The transcript discusses project planning.",
-            "secondary_topics": [],
-        }
-
-        clean = validate_payload(payload)
-
-        self.assertEqual(clean["major_topic"], "business_management")
-        self.assertEqual(clean["minor_topic"], "project_management")
 
     def test_fire_red_speech_segments_convert_to_silence_segments(self):
         segments = speech_segments_to_silence_segments(
@@ -2086,29 +1938,50 @@ class AcousticToolsTest(unittest.TestCase):
                 "--speaker-profile",
                 "lean-shadow",
                 "--speaker-v2-skip-model-verification",
-                "--topic-enable",
-                "--topic-model",
-                "gpt-5.5",
-                "--topic-api-key-path",
-                "api.txt",
                 "--sample-id",
                 "utt1",
                 "--input-tags",
                 "old.jsonl",
                 "--only-tags",
-                "speaker,language_content.topic",
+                "speaker.asr_transcript,language_content.word_count",
                 "--missing-only",
             ]
         )
         self.assertEqual(args.speaker_profile, "lean-shadow")
         self.assertTrue(args.speaker_v2_skip_model_verification)
-        self.assertTrue(args.topic_enable)
-        self.assertEqual(args.topic_model, "gpt-5.5")
-        self.assertEqual(args.topic_api_key_path, "api.txt")
         self.assertEqual(args.sample_id, ["utt1"])
         self.assertEqual(args.input_tags, "old.jsonl")
-        self.assertEqual(args.only_tags, "speaker,language_content.topic")
+        self.assertEqual(
+            args.only_tags,
+            "speaker.asr_transcript,language_content.word_count",
+        )
         self.assertTrue(args.missing_only)
+
+    def test_public_schema_replaces_topic_with_speaker_asr_transcript(self):
+        tags = empty_tags()
+
+        self.assertEqual(sum(len(fields) for fields in tags.values()), 31)
+        self.assertIn("asr_transcript", tags["speaker"])
+        self.assertNotIn("topic", tags["language_content"])
+
+    def test_speaker_asr_tag_selects_speaker_and_audio_probe_stages(self):
+        self.assertEqual(
+            _stages_for_tag_paths(["speaker.asr_transcript"]),
+            {"speaker", "audio_probe"},
+        )
+
+    def test_merge_tags_drops_removed_topic_field(self):
+        merged = _merge_tags(
+            {
+                "language_content": {
+                    "topic": "technology/artificial_intelligence",
+                    "word_count": 12,
+                }
+            }
+        )
+
+        self.assertNotIn("topic", merged["language_content"])
+        self.assertEqual(merged["language_content"]["word_count"], 12)
 
     def test_tagging_manifest_reuses_context_and_isolates_speaker_artifacts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2123,6 +1996,7 @@ class AcousticToolsTest(unittest.TestCase):
 
             public_speaker = {
                 "speaker_count": 1,
+                "speaker_present": True,
                 "multi_speaker": False,
                 "speaker_change_count": 0,
                 "speaker_change": False,
@@ -2151,8 +2025,8 @@ class AcousticToolsTest(unittest.TestCase):
 
             self.assertEqual(summary["sample_count"], 2)
             self.assertEqual(run_speaker.call_count, 2)
-            first = run_speaker.call_args_list[0].kwargs
-            second = run_speaker.call_args_list[1].kwargs
+            first = run_speaker.call_args_list[0][1]
+            second = run_speaker.call_args_list[1][1]
             self.assertIs(first["context"], second["context"])
             self.assertNotEqual(
                 first["artifact_sample_id"],
@@ -2164,7 +2038,11 @@ class AcousticToolsTest(unittest.TestCase):
             )
             with output_path.open("r", encoding="utf-8") as source_file:
                 rows = [json.loads(line) for line in source_file if line.strip()]
-            self.assertEqual([row["speaker"] for row in rows], [public_speaker] * 2)
+            expected_speaker = dict(public_speaker, asr_transcript=None)
+            self.assertEqual(
+                [row["speaker"] for row in rows],
+                [expected_speaker] * 2,
+            )
 
     def test_tagging_manifest_supplements_selected_sample_tags_from_existing_output(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2229,6 +2107,22 @@ class AcousticToolsTest(unittest.TestCase):
                 tags = json.loads(source_file.readline())
             self.assertTrue(all(value is None for value in tags["speaker"].values()))
 
+    def test_input_transcript_does_not_populate_speaker_asr_transcript(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "audio.wav"
+            write_test_wav(path, sample_rate=8000, channels=1, duration_sec=2.0)
+            record = make_record(str(path))
+            record["sample"]["text"]["transcript"] = "Reference transcript."
+
+            tags = tag_sample_record(
+                record,
+                tmpdir,
+                speaker_config=object(),
+                selected_tag_paths=["speaker.asr_transcript"],
+            )
+
+            self.assertIsNone(tags["speaker"]["asr_transcript"])
+
     def test_speaker_auditor_rejects_invalid_public_values(self):
         speaker = {
             "multi_speaker": "yes",
@@ -2253,6 +2147,51 @@ class AcousticToolsTest(unittest.TestCase):
             ],
         )
         self.assertTrue(all(value is None for value in speaker.values()))
+
+    def test_speaker_present_is_derived_from_speaker_count(self):
+        for speaker_count, expected in (
+            (None, None),
+            (0, False),
+            (1, True),
+            (2, True),
+        ):
+            speaker = {"speaker_count": speaker_count}
+
+            warnings = audit_speaker(speaker)
+
+            self.assertEqual(warnings, [])
+            self.assertIs(speaker["speaker_present"], expected)
+
+    def test_speaker_present_overrides_inconsistent_existing_value(self):
+        speaker = {"speaker_count": 0, "speaker_present": True}
+
+        warnings = audit_speaker(speaker)
+
+        self.assertEqual(
+            warnings,
+            [{"type": "invalid_speaker_value", "field": "speaker_present"}],
+        )
+        self.assertFalse(speaker["speaker_present"])
+
+    def test_speaker_auditor_normalizes_asr_transcript(self):
+        speaker = {"asr_transcript": "  Complete MOSS transcript.  "}
+
+        warnings = audit_speaker(speaker)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(speaker["asr_transcript"], "Complete MOSS transcript.")
+
+    def test_speaker_auditor_nulls_invalid_asr_transcript(self):
+        for value in ("", "   ", 42, ["not", "text"]):
+            speaker = {"asr_transcript": value}
+
+            warnings = audit_speaker(speaker)
+
+            self.assertEqual(
+                warnings,
+                [{"type": "invalid_speaker_value", "field": "asr_transcript"}],
+            )
+            self.assertIsNone(speaker["asr_transcript"])
 
     def test_speaker_auditor_accepts_valid_profiles(self):
         speaker = {
@@ -2295,6 +2234,7 @@ class AcousticToolsTest(unittest.TestCase):
         warnings = audit_speaker(speaker)
 
         self.assertEqual(warnings, [])
+        self.assertTrue(speaker["speaker_present"])
         self.assertEqual(len(speaker["profiles"]), 3)
 
     def test_speaker_auditor_rejects_invalid_profiles(self):
@@ -2364,6 +2304,7 @@ class AcousticToolsTest(unittest.TestCase):
         warnings = audit_speaker(speaker)
 
         self.assertEqual(warnings, [])
+        self.assertFalse(speaker["speaker_present"])
         self.assertEqual(speaker["profiles"], [])
 
 
@@ -2427,18 +2368,6 @@ class FakeDnsmosClient:
 
     def estimate(self, audio_path, context=None):
         self.call_count += 1
-        return self.output
-
-
-class FakeTopicClient:
-    def __init__(self, output):
-        self.output = output
-        self.call_count = 0
-        self.prompts = []
-
-    def complete_json(self, prompt):
-        self.call_count += 1
-        self.prompts.append(prompt)
         return self.output
 
 
