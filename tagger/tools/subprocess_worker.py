@@ -57,6 +57,8 @@ def dispatch(tool_name, request):
         return _run_recrir_estimate(request)
     if tool_name == "moss_diarize_estimate":
         return _run_moss_diarize_estimate(request)
+    if tool_name == "firered_asr_estimate":
+        return _run_firered_asr_estimate(request)
     if tool_name == "campplus_identity_estimate":
         return _run_campplus_identity_estimate(request)
     if tool_name == "ecapa_identity_estimate":
@@ -204,6 +206,29 @@ def _run_moss_diarize_estimate(request):
         config,
     )
     return {"output": client.diarize(request["audio_path"], context=None)}
+
+
+def _run_firered_asr_estimate(request):
+    """Run one FireRedASR2-AED request using a cached model client."""
+
+    from tagger.tools.speaker_v2.firered_asr import (
+        FireRedAsrClient,
+        FireRedAsrConfig,
+    )
+
+    config_record = dict(request.get("config") or {})
+    # The parent config normally carries the subprocess executable only as
+    # provenance.  It must not recursively cause another subprocess client in
+    # this worker.
+    config_record["subprocess_python"] = ""
+    config = FireRedAsrConfig(**config_record)
+    client = _cached_client(
+        "firered_asr_estimate",
+        config_record,
+        FireRedAsrClient,
+        config,
+    )
+    return {"output": client.transcribe(request["audio_path"], context=None)}
 
 
 def _run_campplus_identity_estimate(request):

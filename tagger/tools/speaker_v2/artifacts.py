@@ -2,9 +2,10 @@
 
 All filesystem layout and atomic-write behavior comes from the frozen
 ``speaker_v1/artifacts.py`` snapshot.  This layer only adds the versioned run
-profile, expanded claim policy, and complete eight-model execution inventory.
+profile, expanded claim policy, and complete nine-model execution inventory.
 Old callers that do not provide profile fields are recorded as
 ``legacy-shadow`` and keep the original call signatures and artifact paths.
+The inventory now includes the independent FireRedASR2-AED lexical source.
 """
 
 import copy
@@ -113,7 +114,7 @@ def write_run_manifest(
     fail_fast=False,
     resume=False,
 ):
-    """Write the frozen run manifest plus policy and eight-model inventory."""
+    """Write the frozen run manifest plus policy and nine-model inventory."""
 
     path = _LEGACY.write_run_manifest(
         output_dir,
@@ -159,6 +160,7 @@ def write_run_manifest(
             "overlap_ratio",
             "speaker_overlap",
             "profiles",
+            "asr_transcript",
         ],
     }
     value["models"] = _model_inventory(config, expanded)

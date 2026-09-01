@@ -61,6 +61,7 @@ from tagger.pipelines.speaker_evidence import (
 from tagger.tools.speaker_v2.profiles import (
     available_profiles as available_speaker_profiles,
 )
+from tagger.tools.speaker_v2.firered_asr import FireRedAsrConfig
 from tagger.tools.language_content.registry import (
     DETERMINISTIC_LANGUAGE_CONTENT_TOOL,
     FIRERED_LID_LANGUAGE_CONTENT_TOOL,
@@ -1099,6 +1100,12 @@ def _run_speaker_tools(
                     "policy_hash": result.get("policy_hash"),
                     "fusion_artifact": result.get("fusion_artifact"),
                     "artifacts": result.get("artifacts"),
+                    "asr_selected_source": result.get("asr_selected_source"),
+                    "language_route": result.get("language_route"),
+                    "language_route_reason": result.get(
+                        "language_route_reason"
+                    ),
+                    "asr_route": result.get("asr_route"),
                 },
             ).to_record()
         )
@@ -2288,6 +2295,53 @@ def build_arg_parser():
         help="Speaker-v2 model and claim-routing profile. Defaults to quality-shadow.",
     )
     parser.add_argument(
+        "--firered-asr-python",
+        default=None,
+        help="Python executable for the speaker-v2 FireRed ASR worker.",
+    )
+    parser.add_argument(
+        "--firered-asr-model",
+        default=None,
+        help="FireRedASR2-AED model directory used by speaker-v2.",
+    )
+    parser.add_argument(
+        "--firered-asr-source",
+        default=None,
+        help="FireRedASR2S source directory used by speaker-v2.",
+    )
+    parser.add_argument(
+        "--firered-asr-device",
+        default=None,
+        help="FireRed ASR CUDA device or cpu (default: cuda:1).",
+    )
+    parser.add_argument(
+        "--firered-asr-beam-size",
+        type=int,
+        default=3,
+        help="FireRed ASR beam size used by speaker-v2.",
+    )
+    parser.add_argument(
+        "--firered-asr-half",
+        action="store_true",
+        help="Use half precision for FireRed ASR decoding.",
+    )
+    parser.add_argument(
+        "--firered-asr-timeout-sec",
+        type=int,
+        default=900,
+        help="Timeout for one speaker-v2 FireRed ASR request.",
+    )
+    parser.add_argument(
+        "--firered-asr-disable-lid",
+        action="store_true",
+        help="Disable the same-runtime FireRed LID used for strict ASR routing.",
+    )
+    parser.add_argument(
+        "--firered-asr-lid-model",
+        default=None,
+        help="FireRedLID model directory; defaults beside FireRedASR2S.",
+    )
+    parser.add_argument(
         "--speaker-v2-skip-model-verification",
         action="store_true",
         help="Skip pinned speaker-v2 model asset hash verification.",
@@ -2341,10 +2395,22 @@ def main(argv=None):
         subprocess_python=args.dnsmos_python,
         use_gpu=args.dnsmos_use_gpu,
     )
+    firered_asr_config = FireRedAsrConfig(
+        model_dir=args.firered_asr_model,
+        source_dir=args.firered_asr_source,
+        subprocess_python=args.firered_asr_python,
+        device=args.firered_asr_device or "cuda:1",
+        use_half=args.firered_asr_half,
+        beam_size=args.firered_asr_beam_size,
+        timeout_sec=args.firered_asr_timeout_sec,
+        enable_lid=not args.firered_asr_disable_lid,
+        lid_model_dir=args.firered_asr_lid_model,
+    )
     speaker_config = default_speaker_evidence_config(
         profile_id=args.speaker_profile,
         vad_config=firered_vad_config,
         brouhaha_config=brouhaha_config,
+        firered_asr_config=firered_asr_config,
         verify_model_assets=not args.speaker_v2_skip_model_verification,
     )
     summary = run_manifest(

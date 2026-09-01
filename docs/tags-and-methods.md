@@ -25,9 +25,10 @@ CUDA_VISIBLE_DEVICES=0 python3 scripts/run_tagger.py \
   --recrir-use-gpu
 ```
 
-模型和独立 Python 环境的路径配置在 `tagger/local_config.py`。当前
-FireRed 和 Brouhaha 环境使用 CPU 版 PyTorch，因此运行示例没有传入它们的
-GPU 参数。
+模型和独立 Python 环境的路径配置在 `tagger/local_config.py`。FireRed VAD/AED/LID
+与 Brouhaha 的通用工具配置默认走 CPU；speaker-v2 的 FireRedASR2-AED 使用独立
+CUDA runtime，主 tagging CLI 默认设备为 `cuda:1`（可用
+`--firered-asr-device` 覆盖）。
 
 只跑某一个样本的完整链路：
 
@@ -179,7 +180,7 @@ FireRed AED 的 `music_present` 门控——AED 判定无音乐时音乐桶为�
 | `speaker.overlap_ratio` | number / `[0, 1]` | 从 speaker v2 为 overlap claim 选中的 timeline 派生，分母为 speech union duration | 重叠发言时长占有效语音时长的比例。 |
 | `speaker.speaker_overlap` | boolean | speaker v2 的 overlap claim；Pyannote 主判，Sortformer/MOSS 作 witness 或 fallback | 是否存在多人同时发言。 |
 | `speaker.profiles` | array of object / nullable | speaker v2 的确定性画像（2026-08-26 起，复用 decision timeline、MOSS 文本和 VAD，无新模型） | 每个说话人的语言感知语速、相对音高档位和片段内相对音量。每项为 `speaker_id`（`speaker_1`、`speaker_2`…）、`speech_rate`（`band` 取 `slow`/`normal`/`fast`/`variable`、`value`、`unit` 取 `zh_char_per_sec`/`word_per_min`；`unit` 未知时 `value` 为 `null`）、`pitch`（`low`/`mid`/`high`/`variable`，相对 F0 档位，不映射性别）、`speaker_volume`（`low`/`normal`/`loud`/`variable`，仅同片段内相对响度）。语速为首版重点：中文按有效汉字/秒，拉丁语系按词/分钟，重叠区间、静音和无 speech coverage 的区间不参与汇总，累计有效语音不足 3 秒或文本单位不足 8 时该说话人语速为 `null`。无法得到可靠时间轴时为 `null`，确认没有语音时为 `[]`。不推断年龄、性别、情绪或口音；原始 F0/RMS/区间只进内部 artifact。 |
-| `speaker.asr_transcript` | string / nullable | MOSS 全音频时间线 segment 文本按 `start_sec` 排序后拼接 | 整段音频的上游 ASR 文本；去除首尾空白，不含时间戳和 speaker ID。只来自 MOSS，绝不以 `sample.text.transcript` 补值；MOSS 无有效文本或失败时为 `null`。 |
+| `speaker.asr_transcript` | string / nullable | MOSS 与 FireRedASR2-AED 并行；只有 FireRed LID 明确为 `en`、文本通过 ASCII-English 检查且 MOSS 可用时取 MOSS，否则取 FireRed；一路失败时回退到另一路 | 整段音频的上游 ASR 文本；去除首尾空白，不含时间戳和 speaker ID。绝不以 `sample.text.transcript` 补值；双路均无有效文本时为 `null`。路由 source、语言判断和候选文本保存在 speaker artifact。 |
 
 总线直接调用 `tagger/pipelines/speaker_evidence.py`，默认 profile 是
 `quality-shadow`，不再读取 native metadata 生成 speaker 公开值，也不存在旧的
@@ -195,7 +196,7 @@ artifact，不进入公开 tags-only 输出。
 
 | Tag | 类型 | 打标方法 | 含义 |
 | --- | --- | --- | --- |
-| `language_content.language` | string | 非空 transcript：FireRed LID 音频模型；空 transcript：speaker-v2 ASR + Unicode heuristic | 非空文本沿用音频语言/方言识别；空文本使用 speaker-v2 ASR 文本识别语言。 |
+| `language_content.language` | string | 非空 transcript：FireRed LID 音频模型；空 transcript：沿用 speaker-v2 的 ASR 文本流程 | 非空文本沿用音频语言/方言识别；空文本使用 speaker-v2 选中的 ASR 文本识别语言。 |
 | `language_content.word_count` | integer | simple multilingual tokenizer | transcript 中的词数。 |
 | `language_content.punctuation` | object | Unicode punctuation counter | `punctuation_count` 和 `has_terminal_punctuation`。 |
 | `language_content.repetition` | object | consecutive token ngram rule | `has_repetition` 和 `repetition_count`。 |
@@ -215,7 +216,7 @@ transcript；为空时读取 speaker-v2 ASR，不额外处理音频。
 | Brouhaha | 16 kHz、单通道 | pyannote 在内存中对多通道取均值并重采样。 |
 | DNSMOS | 16 kHz、单通道 | 多通道取均值，使用 librosa 重采样。 |
 | Rec-RIR | 16 kHz、单通道 | torchaudio 对多通道取均值并重采样，临时 WAV 推理后删除。 |
-| Speaker v2 | 各模型适配器要求的单通道采样率 | MOSS、Sortformer、Pyannote、ECAPA、FireRed VAD 和 Brouhaha 分别在适配器内完成解码、降混与重采样，再按 profile 融合 claim。 |
+| Speaker v2 | 各模型适配器要求的单通道采样率 | MOSS、FireRedASR2-AED、Sortformer、Pyannote、ECAPA、FireRed VAD 和 Brouhaha 分别在适配器内完成解码、降混与重采样，再按 profile 融合 claim。FireRed ASR 只产生 lexical evidence，不参与 speaker timeline claim。 |
 | 确定性语言内容 | 原始 transcript，或 transcript 为空时的 speaker-v2 ASR | 不做音频预处理；直接对文本 tokenize 和统计；空 transcript 时语言字段也使用同一 ASR 文本。 |
 
 因此 8 kHz 或双通道音频可以正常进入模型。需要注意，8 kHz 上采样只能

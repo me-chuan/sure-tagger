@@ -89,10 +89,13 @@ pipeline 会自动补跑 `audio_probe`。
 
 ## 4. 无 transcript guard
 
-如果 `sample.text.transcript` 为空，pipeline 会先尝试使用 speaker-v2 的联合
-ASR（MOSS）生成替代文本。生成成功时，language-content 的全部标签使用这段
-ASR 文本；生成失败时才跳过依赖语言内容的 stage。其它音频和非语言 stages
-仍按正常流程运行：
+如果 `sample.text.transcript` 为空，pipeline 会先让 speaker-v2 并行运行两条
+ASR 路径：MOSS-Transcribe-Diarize 和 FireRedASR2-AED。只有同一 FireRedASR2S
+runtime 的 LID 明确返回 `en`、且 FireRed 文本通过 ASCII-English 检查时才选择
+MOSS 文本；中文、混合语言、非拉丁文字或语言判定未知时选择 FireRed。
+只有选中的 ASR 文本可用时，language-content 的文本标签才会继续运行；两条
+路径都不可用时才跳过依赖语言内容的 stage。其它音频和非语言 stages 仍按正常
+流程运行：
 
 ```text
 language_deterministic
@@ -106,8 +109,9 @@ language_content.* = null  （仅在 speaker-v2 没有可用 ASR 时）
 ```
 
 speaker-v2 ASR 同时公开为 `speaker.asr_transcript` 并作为 language-content
-的 fallback 输入。它只来自 MOSS，不会把输入 transcript 传入 speaker
-resolver 或复制为该字段。`audio_probe`、`silence`、
+的 fallback 输入。双路原始输出、`asr_route`、选中 source 和失败原因都会写入
+speaker artifact；不会把输入 transcript 传入 speaker resolver 或复制为该字段。
+`audio_probe`、`silence`、
 `speaker`、`brouhaha`、`dnsmos`、`firered_aed`、`dass` 和 `recrir` 仍可运行，
 因为它们可以用于纯噪声或无 transcript 音频的基础音频、声学、说话人和声场分析。
 
@@ -128,8 +132,8 @@ tagger/tools/language_content/deterministic.py
 
 模型：无。
 
-输入：非空时使用 `sample.text.transcript`；为空时使用 speaker-v2 的 MOSS
-联合 ASR 文本。
+输入：非空时使用 `sample.text.transcript`；为空时使用 speaker-v2 的双路 ASR
+路由结果（纯英文优先 MOSS，其它语言优先 FireRed）。
 
 输出：
 
@@ -141,7 +145,8 @@ language_content.filler
 ```
 
 `language_content.language` 在非空 transcript 时由 FireRed LID 音频模型产出；
-空 transcript 时改由上述 ASR 文本的 Unicode script heuristic 产出。
+空 transcript 时沿用 speaker-v2 的 ASR 文本流程。speaker-v2 的 ASR 路由使用同一
+FireRed LID 结果，LID 不可用时语言状态为 unknown，并默认选择 FireRed。
 
 ### 5.1b FireRed LID
 
@@ -171,19 +176,30 @@ models/FireRedASR2S/examples_infer/lid/fireredlid
 language_content.language  （ISO 语言码或 zh-<region> 方言码，如 zh-xinan）
 ```
 
-### 5.2 MOSS ASR 公共字段
+### 5.2 Speaker v2 双路 ASR 公共字段
 
-MOSS 在 speaker stage 中对完整音频运行。Pipeline 从 MOSS 时间线中取所有
-有效 segment 文本，按 `start_sec` 排序后以空格拼接，输出：
+MOSS 与 FireRedASR2-AED 在 speaker stage 中对完整音频并行运行。MOSS 从时间线
+中取所有有效 segment 文本，按 `start_sec` 排序后以空格拼接；FireRed 从 AED
+文本和原生 timestamp 生成独立 lexical evidence。最终输出：
 
 ```text
 speaker.asr_transcript
 ```
 
+路由规则是：FireRed LID 明确返回 `en`、文本至少含一个 ASCII 英文字母且没有非
+ASCII 字母，同时 MOSS 可用时，
+选择 MOSS；否则选择 FireRed。没有语言元数据或 LID 失败都属于 unknown，默认走
+FireRed。一路失败时记录 availability fallback 到另一路。
 该字段不包含时间戳或 speaker ID，也不会使用 `sample.text.transcript` 补值。
-MOSS 失败、输出非法或没有有效文本时为 `null`。sure-tagger 不再注册
+两路均失败、输出非法或没有有效文本时为 `null`。sure-tagger 不再注册
 `language_content.topic` 或 topic stage；开放描述性 topic 由下游语言模型
-基于确定性标签和这段 ASR 文本推断。
+基于确定性标签和这段选中的 ASR 文本推断。
+
+FireRed 的内部 evidence source 为 `fireredasr2_aed`，模型目录为
+`models/FireRedASR2-AED`，源码目录为 `models/FireRedASR2S`，默认 runtime 为
+`.runtime/fireredasr2_aed_py311_torch280_cu128_v1/bin/python`。FireRed 只承担
+ASR/lexical 能力，不参与 C/M/O/X speaker timeline claim；MOSS timeline 继续
+承担 speaker 事件和说话人文本归属。
 
 ### 5.3 Audio Probe
 
@@ -265,6 +281,7 @@ tagger/tools/speaker_v2/
 
 ```text
 MOSS-Transcribe-Diarize
+FireRedASR2-AED + FireRedLID
 FireRed VAD
 NVIDIA Streaming Sortformer 4spk v2
 Pyannote Community-1
@@ -608,7 +625,7 @@ PYTHONPATH=. python3 scripts/run_tagger.py \
   --only-tags basic_acoustic.silence_ratio,speaker
 ```
 
-给已有 phase2 结果只补 MOSS ASR：
+给已有 phase2 结果补 speaker-v2 双路 ASR 和语言路由：
 
 ```bash
 PYTHONPATH=. python3 scripts/run_tagger.py \

@@ -27,7 +27,7 @@ speaker.speaker_change_count	annotation[].speaker.speaker_change_count	pyannote 
 speaker.speaker_overlap	annotation[].speaker.speaker_overlap	pyannote Community-1  / Sortformer/ MOSS-Diarize	✅ 已实现（overlap 主源为 pyannote，与计划一致）
 speaker.overlap_ratio	annotation[].speaker.overlap_ratio	pyannote Community-1  / Sortformer / MOSS-Diarize	✅ 已实现（同上）
 speaker.profiles	（公司 schema 暂无对应；对齐 captioner speakerProfile 的 speed/pitch/speaker_volume）	确定性统计适配器（复用 decision timeline / MOSS 文本 / VAD，无新模型）	✅ 已实现（2026-08-26）：speaker_v2.speaker_profile.v0.1，语速（zh_char_per_sec / word_per_min）、相对音高档位、片段内相对音量；不可靠值为 null，不推断年龄/性别/情绪/口音（属 Phase 3 属性模型闸门）
-speaker.asr_transcript	annotation[].transcription.text	MOSS-Transcribe-Diarize 时间线文本	✅ 已实现（2026-08-31）：完整音频 segment 文本按时间顺序拼接；不含时间戳/speaker ID，不读取输入 transcript
+speaker.asr_transcript	annotation[].transcription.text	MOSS + FireRedASR2-AED 双路 ASR（FireRed LID 明确 en 且 ASCII-English 才选 MOSS，其它语言选 FireRed）	✅ 已实现（2026-08-31）：两路并行推理；只有 FireRed LID 明确 en 且文本通过 ASCII-English 检查时路由到 MOSS，中文/混合/非拉丁/未知路由到 FireRed；一路失败显式回退；不含时间戳/speaker ID，不读取输入 transcript
 语言		
 language_content.language	annotation[].transcription.language	FireRedLID	✅ 已实现（2026-08-23）：firered_lid stage，模型 models/FireRedASR2S/pretrained_models/FireRedLID，runtime .runtime/fireredlid_py311，支持 100+ 语言与 zh-<region> 方言码；原 Unicode script 启发式保留在 deterministic.py 但不再注册为 language 来源
 language_content.word_count	annotation[].transcription.word_count	确定性脚本	✅ 已实现

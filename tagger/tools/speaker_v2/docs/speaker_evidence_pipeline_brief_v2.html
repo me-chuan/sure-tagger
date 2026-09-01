@@ -31,7 +31,7 @@
         font-size: 8pt;
       }
       @top-right {
-        content: "工程接入版 · 2026-08-17";
+        content: "工程接入版 · 更新至 2026-08-31";
         color: #52626d;
         font-family: "Droid Sans", "Speaker CJK", "DejaVu Sans", sans-serif;
         font-size: 8pt;
@@ -239,13 +239,13 @@
     <div class="metric-row">
       <div class="metric"><div class="big">C / M / O / X</div><div class="small">四类 speaker claim<br>逐 claim 独立路由</div></div>
       <div class="metric"><div class="big">I + V</div><div class="small">身份比较与语音覆盖<br>不混入事件票</div></div>
-      <div class="metric"><div class="big">3 profiles</div><div class="small">legacy · quality · lean<br>默认仍是 legacy</div></div>
-      <div class="metric"><div class="big">70 / 70</div><div class="small">speaker-v2 扩展测试<br>当前工程回归</div></div>
+      <div class="metric"><div class="big">3 profiles</div><div class="small">legacy · quality · lean<br>standalone 默认 legacy</div></div>
+      <div class="metric"><div class="big">112 / 112</div><div class="small">speaker-v2 扩展测试<br>当前工程回归</div></div>
     </div>
     <div class="meta">
-      <div><strong>版本：</strong>工程接入版 · 2026-08-17</div>
-      <div><strong>默认：</strong><code>legacy-shadow</code>；<code>quality-shadow</code> 需显式启用</div>
-      <div><strong>公开输出：</strong>shadow 阶段 public adapter disabled，speaker 字段保持 <code>null</code></div>
+      <div><strong>版本：</strong>工程接入版 · 2026-08-17，更新至 2026-09-01</div>
+      <div><strong>默认：</strong>standalone 为 <code>legacy-shadow</code>；主 tagging pipeline 为 <code>quality-shadow</code></div>
+      <div><strong>公开输出：</strong>public adapter 直接发布可决策字段；冲突或证据不足时保持 <code>null</code></div>
     </div>
     <div class="cover-foot">输入固定为当前 utterance 的 <code>sample.audio.path</code>；native/gold/reference 只允许 post-inference 评测，证据门禁未齐即 abstain。</div>
   </section>
@@ -262,12 +262,12 @@
     <div class="section-rule"></div>
     <div class="lead">
       <p><strong>一句话结论：</strong>v2 不是“再加几路模型投票”，而是把 timeline、身份、覆盖和校准拆成可审计证据角色，再用版本化 policy 决定每个 claim 的 primary、guard、fallback 与 excluded source。</p>
-      <p class="small-note">当前交付定位为 engineering shadow：接口、路由、artifact 和回滚已接入；1k fusion、非 AMI 与 production gate 尚未通过。</p>
+      <p class="small-note">当前接口、路由、artifact、直接公开输出和双路 ASR 已接入；1k fusion、非 AMI 与 standalone 默认 profile 切换仍作为后续质量观测。</p>
     </div>
     <div class="three-col" style="margin-top: 18mm;">
       <div class="card blue"><h4>输入边界</h4><p>只读当前 utterance 音频，范围为 <code>[0, duration]</code>。</p></div>
       <div class="card purple"><h4>决策边界</h4><p>guards 第一版只记录诊断，不额外计票。</p></div>
-      <div class="card red"><h4>发布边界</h4><p><code>supported/conflicted/insufficient</code> 均映射为 <code>null</code>。</p></div>
+      <div class="card red"><h4>发布边界</h4><p><code>supported</code> 且值合法时直接发布；<code>conflicted/insufficient</code> 映射为 <code>null</code>。</p></div>
     </div>
   </section>
 
@@ -275,8 +275,8 @@
   <section class="page">
     <h2>1. v2 核心变化</h2>
     <div class="lead">
-      <p><strong>目标：</strong>在不改变 utterance-level 输入契约的前提下，将“所有 timeline 对所有标签等权”改为 claim-aware resolver；同时把 ECAPA 身份链路、Brouhaha 覆盖链路和可复现 artifact 接入同一 shadow 框架。</p>
-      <p class="small-note">policy：<code>speaker_v2.claim_policy.20260817.1</code> · 默认 profile：<code>legacy-shadow</code> · public adapter：disabled</p>
+      <p><strong>目标：</strong>在不改变 utterance-level 输入契约的前提下，将“所有 timeline 对所有标签等权”改为 claim-aware resolver；同时把双路 ASR、ECAPA 身份链路、Brouhaha 覆盖链路和可复现 artifact 接入同一框架。</p>
+      <p class="small-note">policy：<code>speaker_v2.claim_policy.20260831.1</code> · standalone 默认 profile：<code>legacy-shadow</code> · public adapter：enabled</p>
     </div>
     <table>
       <thead><tr><th>维度</th><th>旧 v2 行为</th><th>Speaker v2 claim-aware 行为</th></tr></thead>
@@ -292,14 +292,14 @@
     <div class="two-col">
       <div class="card blue"><h4>Sample-local scope</h4><p>只读取当前 <code>sample.audio.path</code>；不拼接相邻 utterance，不借用跨音频 speaker ID、embedding 或 transcript。</p></div>
       <div class="card green"><h4>Evidence independence</h4><p>共享 checkpoint、joint generation 或派生字段不重复计票；dependency group 和 lineage 进入 artifact。</p></div>
-      <div class="card yellow"><h4>Conservative certification</h4><p>独立事件、event alignment、identity、coverage、域校准与 joint-negative gate 缺一不可。</p></div>
-      <div class="card purple"><h4>Shadow first</h4><p><code>certified</code> 才可发布 bool；当前所有新 profile 仍保持 public speaker 为 <code>null</code>。</p></div>
+      <div class="card yellow"><h4>Conservative resolution</h4><p>claim 只使用版本化 primary / guard / fallback；冲突、证据不足或非法派生保持 <code>null</code>。</p></div>
+      <div class="card purple"><h4>Direct, auditable output</h4><p>claim policy 的可决策结果直接发布；冲突或证据不足的字段保持 <code>null</code>，route 与 lineage 始终写入 artifact。</p></div>
     </div>
     <h3>1k standalone 选型依据（不是融合结果）</h3>
     <div class="three-col">
       <div class="card"><div class="big-number">1,000</div><div class="label">utterances · 167 meetings · 7.7514 h</div></div>
       <div class="card"><div class="big-number">23,815</div><div class="label">identity trials（meeting/global speaker 隔离）</div></div>
-      <div class="card"><div class="big-number">8 路</div><div class="label">模型 inventory · 3 个可选 profile</div></div>
+      <div class="card"><div class="big-number">9 路</div><div class="label">模型 inventory · 3 个可选 profile</div></div>
     </div>
   </section>
 
@@ -313,10 +313,11 @@
     <p><strong>实际执行分四段：</strong></p>
     <ol class="numbered tight">
       <li>读取当前 utterance 的 <code>sample.audio.path</code>，计算 duration、audio hash 和 sample-local scope。</li>
-      <li>并行启动 profile 允许的 adapters：MOSS、Sortformer、pyannote、Brouhaha/FireRed、ECAPA，以及可选 Whisper lexical audit。</li>
+      <li>并行启动 profile 允许的 adapters；其中 MOSS 与 FireRedASR2-AED 对同一样本同时推理，另有 Sortformer、pyannote、Brouhaha/FireRedVAD、ECAPA 和可选 Whisper lexical audit。</li>
       <li>统一 timebase、匿名 speaker ID、dependency groups 和 contract；随后按 claim policy 选择 candidate 与 fallback。</li>
-      <li>经过 identity / coverage / calibration / dependency closure 后写入 fusion、certification、run manifest；shadow public adapter 保持 disabled。</li>
+      <li>经过 identity / coverage / calibration / dependency closure 后写入 fusion、certification、run manifest；可决策字段由 public adapter 直接发布。</li>
     </ol>
+    <p><strong>ASR 路由：</strong>只有 FireRed LID 明确为 <code>en</code> 且 FireRed 文本为 ASCII-English 时选择 MOSS；中文、混合、非拉丁或 unknown 选择 FireRed。一路失败时回退另一条，并记录两路候选、<code>language_error</code> 与 fallback 原因。</p>
   </section>
 
   <!-- Routing -->
@@ -347,9 +348,9 @@
     <table>
       <thead><tr><th>Profile</th><th>启用模型</th><th>定位</th></tr></thead>
       <tbody>
-        <tr><td><code>legacy-shadow</code></td><td>MOSS / FireRed / CAM++ / Whisper / Sortformer / pyannote</td><td>回滚与兼容基线；ECAPA/Brouhaha 关闭</td></tr>
-        <tr><td><code>quality-shadow</code></td><td>MOSS / FireRed / Sortformer / pyannote / ECAPA / Brouhaha</td><td>候选质量 profile；CAM++/Whisper 关闭</td></tr>
-        <tr><td><code>lean-shadow</code></td><td>Sortformer / pyannote / ECAPA / Brouhaha</td><td>成本优先；X 退化为 Sortformer 单路</td></tr>
+        <tr><td><code>legacy-shadow</code></td><td>MOSS / FireRedASR / FireRedVAD / CAM++ / Whisper / Sortformer / pyannote</td><td>回滚与兼容基线；ECAPA/Brouhaha 关闭</td></tr>
+        <tr><td><code>quality-shadow</code></td><td>MOSS / FireRedASR / FireRedVAD / Sortformer / pyannote / ECAPA / Brouhaha</td><td>候选质量 profile；CAM++/Whisper 关闭</td></tr>
+        <tr><td><code>lean-shadow</code></td><td>FireRedASR / Sortformer / pyannote / ECAPA / Brouhaha</td><td>成本优先；MOSS 关闭，X 退化为 Sortformer 单路</td></tr>
       </tbody>
     </table>
   </section>
@@ -365,18 +366,17 @@
           <tbody>
             <tr><td>Timeline / event</td><td>MOSS、Sortformer、pyannote：C/M/O/X candidate 与局部事件。</td></tr>
             <tr><td>Identity</td><td>ECAPA / CAM++：候选片段是否为不同 speaker；不产 timeline。</td></tr>
-            <tr><td>Coverage</td><td>Brouhaha / FireRed：speech union、silence、边界与覆盖分母。</td></tr>
-            <tr><td>Lexical / audit</td><td>Whisper：词/段时间与边界歧义；不构成 speaker vote。</td></tr>
+            <tr><td>Coverage</td><td>Brouhaha / FireRedVAD：speech union、silence、边界与覆盖分母。</td></tr>
+            <tr><td>ASR / lexical</td><td>MOSS / FireRedASR2-AED：双路文本候选与语言路由；Whisper 可选审计。FireRedASR 不构成 speaker vote。</td></tr>
           </tbody>
         </table>
       </div>
       <div>
-        <h3>四种 certification 状态</h3>
+        <h3>当前 claim 状态与公开映射</h3>
         <table>
           <thead><tr><th>状态</th><th>公开映射</th></tr></thead>
           <tbody>
-            <tr><td class="status-pass">certified</td><td>所有 event / identity / coverage / calibration gate 通过 → bool</td></tr>
-            <tr><td class="status-warn">supported</td><td>有单边支持但认证角色不足 → <code>null</code></td></tr>
+            <tr><td class="status-pass">supported</td><td>candidate 可决策且值合法 → 直接发布</td></tr>
             <tr><td class="status-block">conflicted</td><td>合格来源冲突 → <code>null</code>，定向复核</td></tr>
             <tr><td>insufficient</td><td>输入、适用性或质量不足 → <code>null</code></td></tr>
           </tbody>
@@ -390,12 +390,12 @@
         <tr><td>Evidence</td><td>模型版本 / SHA256、capabilities、scope、audio hash、runtime、dependency groups</td><td>逐路审计与失败定位</td></tr>
         <tr><td>Fusion</td><td>完整 claims、route decision source、fallback reason、guard/excluded observations</td><td>解释每个 claim 如何得出</td></tr>
         <tr><td>Certification</td><td>policy version/hash、状态、public adapter 映射</td><td>确定性发布边界</td></tr>
-        <tr><td>Run manifest</td><td>profile defaults、8 路 enabled/disabled、配置、禁用原因、policy hash</td><td>复现、回滚与部署审计</td></tr>
+        <tr><td>Run manifest</td><td>profile defaults、9 路 enabled/disabled、配置、禁用原因、policy hash</td><td>复现、回滚与部署审计</td></tr>
       </tbody>
     </table>
     <div class="code-block">native_metadata_entered_inference = false
 input_transcript_entered_resolver = false
-public_adapter.enabled = false
+public_adapter.enabled = true
 guards_affect_candidate = false</div>
     <p class="footer-note">旧 artifact 路径与公共 worker 保留；新版本通过 profile 切换回滚，不物理删除模型、runtime 或历史结果。</p>
   </section>
@@ -414,12 +414,12 @@ guards_affect_candidate = false</div>
     <table class="smoke-table">
       <thead><tr><th>检查项</th><th>真实结果</th></tr></thead>
       <tbody>
-        <tr><td>Evidence status</td><td>MOSS、Sortformer、pyannote、FireRed、ECAPA、Brouhaha 均为 <code>estimated</code>；CAM++ / Whisper 按 profile 明确 disabled。</td></tr>
+        <tr><td>Evidence status</td><td>MOSS、Sortformer、pyannote、FireRedVAD、ECAPA、Brouhaha 均为 <code>estimated</code>；这是 FireRedASR 接入前的历史 smoke，CAM++ / Whisper 按 profile 明确 disabled。</td></tr>
         <tr><td>实际 route source</td><td>C = Sortformer；M = Sortformer；O = pyannote；X = MOSS，符合 quality policy。</td></tr>
         <tr><td>Evaluation-only</td><td>MOSS/Sortformer count=3，pyannote count=2；三路 M/O/X bool 与 native reference 一致，但 native 未进入 resolver。</td></tr>
         <tr><td>ECAPA I</td><td>4 个 predicted non-overlap regions、6 个 comparisons；native metadata 未进入；predicted-region gate=false，counts_for_certification=false。</td></tr>
         <tr><td>Brouhaha V</td><td>coverage ratio <strong>0.786535</strong>；FireRed 对照 <strong>0.721096</strong>；只提供 speech_coverage。</td></tr>
-        <tr><td>Certification / public</td><td>四个内部 claim 均为 <span class="status-warn">supported</span>，不是 certified；public speaker 字段全部为 <code>null</code>。</td></tr>
+        <tr><td>Certification / public</td><td>该 2026-08-17 历史 smoke 的四个内部 claim 均为 <span class="status-warn">supported</span>，当时 public speaker 字段为 <code>null</code>；2026-08-20 起可决策结果已改为直接发布。</td></tr>
       </tbody>
     </table>
     <div class="two-col">
@@ -435,10 +435,10 @@ guards_affect_candidate = false</div>
       <thead><tr><th>Gate</th><th>当前状态</th><th>说明</th></tr></thead>
       <tbody>
         <tr><td>G0 · assets</td><td class="status-pass">PASS</td><td>新模型 checkpoint / runtime hash 已核验。</td></tr>
-        <tr><td>G1 · adapters</td><td class="status-pass">PASS</td><td>工程接线、worker、artifact 和 70/70 speaker-v2 回归通过。</td></tr>
+        <tr><td>G1 · adapters</td><td class="status-pass">PASS</td><td>工程接线、worker、artifact、双路 ASR 和 112/112 speaker-v2 回归通过。</td></tr>
         <tr><td>G2 · integrated shadow</td><td class="status-warn">PARTIAL</td><td>已通过 1 条真实 quality smoke；分层 smoke 与 1k fusion 尚未完成。</td></tr>
         <tr><td>G3 · calibration / non-AMI</td><td class="status-block">BLOCKED</td><td>ECAPA predicted-region、1k ablation、非 AMI meeting-separated 和 pyannote license 待补。</td></tr>
-        <tr><td>G4 · production</td><td class="status-block">BLOCKED</td><td>统计 CI、失败率、资源成本、最终 manifest 审核和默认切换均未开始。</td></tr>
+        <tr><td>G4 · standalone 默认切换</td><td class="status-block">PENDING</td><td>统计 CI、失败率、资源成本和最终 manifest 审核仍用于决定是否把 standalone 默认从 legacy 改为 quality；主 tagging 已默认 quality，不阻断当前直接输出。</td></tr>
       </tbody>
     </table>
     <h3>建议执行顺序</h3>
@@ -447,13 +447,13 @@ guards_affect_candidate = false</div>
       <li>完成 ECAPA predicted-region I 端到端 coverage、abstain、EER/minDCF 和 CAM++ 同口径对照。</li>
       <li>补齐 10 条分层 smoke、failure injection、RTF、CPU/GPU、峰值/常驻内存与失败率。</li>
       <li>使用 meeting-separated 非 AMI 数据复核 C/M/O/X/V，并完成 pyannote license review。</li>
-      <li>冻结 calibration / CI / cost / rollback 后，再决定是否将默认 profile 切到 quality-shadow。</li>
+      <li>冻结 calibration / CI / cost / rollback 后，再决定是否将 standalone 默认 profile 切到 quality-shadow；主 tagging pipeline 当前已默认使用 quality-shadow。</li>
     </ol>
     <div class="callout">
       <p><strong>回滚：</strong>只需切换到 <code>--profile legacy-shadow</code>。旧模型、ECAPA/Brouhaha 资产、公共 subprocess worker、历史 artifact 和 2026-08-13 snapshot 均保留。</p>
-      <p class="small-note">当前部署清单：<code>.deploy/speaker_v2/deployment_manifest_20260817.json</code> · production_approved=false · public_adapter_enabled=false。</p>
+      <p class="small-note">profile 名称保留 <code>shadow</code> 仅用于兼容与回滚；2026-08-20 起 <code>public_adapter_enabled=true</code>。</p>
     </div>
-    <div class="footer-note">最终原则：先把证据链路做成可审计、可回放、可回滚，再用 1k 与非 AMI 门禁决定默认模型选择；在此之前不做物理清理。</div>
+    <div class="footer-note">最终原则：证据链路保持可审计、可回放、可回滚，再用 1k 与非 AMI 观测决定 standalone 默认模型选择；在此之前不做物理清理。</div>
   </section>
 
 </body>

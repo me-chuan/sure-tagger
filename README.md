@@ -88,7 +88,8 @@ python3 scripts/run_tagger.py \
 
 The main pipeline calls speaker v2 directly; there is no legacy MOSS enable gate,
 native-metadata speaker route, or channel-activity fallback. The default profile
-uses MOSS, FireRed VAD, Sortformer, Pyannote, ECAPA, and Brouhaha as configured by
+uses MOSS and FireRedASR2-AED as parallel ASR candidates, plus FireRed VAD,
+Sortformer, Pyannote, ECAPA, and Brouhaha as configured by
 `tagger/pipelines/speaker_evidence.py`. `--speaker-profile lean-shadow` selects
 the lower-cost profile. `--speaker-v2-skip-model-verification` only skips pinned
 asset hash checks; it does not download models or disable inference.
@@ -114,6 +115,11 @@ The `speaker` stage directly runs speaker v2 and publishes seven scalar fields:
 `speaker_count`, derived `speaker_present`, `multi_speaker`,
 `speaker_change_count`, `speaker_change`, `overlap_ratio`, and
 `speaker_overlap`, plus the `profiles` array and `asr_transcript` string. The
-ASR value is the full-sample MOSS timeline text joined in time order; it never
-comes from `sample.text.transcript`. Model evidence and claim routing remain
-internal under `artifacts/speaker_v2/<row-key>/`.
+MOSS and FireRedASR2-AED run concurrently. Only an explicit FireRed LID `en`
+result with an ASCII-English transcript selects MOSS; Chinese, mixed, non-Latin,
+or unknown routes use FireRed. A failed path is recorded and the other usable path is used as an
+availability fallback. Neither path reads `sample.text.transcript`. Candidate
+texts and the route reason remain in the internal artifact under
+`artifacts/speaker_v2/<row-key>/`. See
+[`tagger/tools/speaker_v2/evalue/asr双路评测报告_20260831.md`](tagger/tools/speaker_v2/evalue/asr双路评测报告_20260831.md)
+for the current seven-set comparison.

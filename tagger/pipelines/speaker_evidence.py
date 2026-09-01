@@ -25,6 +25,10 @@ from tagger.tools.speaker.moss_diarizer import (
     parse_moss_text,
     run as run_moss_diarizer,
 )
+from tagger.tools.speaker_v2.firered_asr import (
+    FireRedAsrConfig,
+    run as run_firered_asr,
+)
 from tagger.tools.speaker_v2.artifacts import (
     write_run_manifest,
     write_sample_artifacts,
@@ -101,6 +105,11 @@ DEFAULT_MOSS_PYTHON = PROJECT_ROOT / ".runtime" / (
     "moss_transcribe_diarize_py311_torch280_cu128_v1/bin/python"
 )
 DEFAULT_MOSS_MODEL = PROJECT_ROOT / "models" / "MOSS-Transcribe-Diarize-model"
+DEFAULT_FIRERED_ASR_PYTHON = PROJECT_ROOT / ".runtime" / (
+    "fireredasr2_aed_py311_torch280_cu128_v1/bin/python"
+)
+DEFAULT_FIRERED_ASR_MODEL = PROJECT_ROOT / "models" / "FireRedASR2-AED"
+DEFAULT_FIRERED_ASR_SOURCE = PROJECT_ROOT / "models" / "FireRedASR2S"
 DEFAULT_CAMPPLUS_PYTHON = PROJECT_ROOT / ".runtime" / (
     "campplus_sv_py311_torch280_cu128_v1/bin/python"
 )
@@ -135,6 +144,12 @@ MOSS_MODEL_SHA256 = (
     "9a0ceb4ab7330357db3ff583dba8d83625d5b733b00e1d55d6970e11b07026c4"
 )
 MOSS_SOURCE_VERSION = "OpenMOSS/MOSS-Transcribe-Diarize-0.9B@shared-20260811"
+FIRERED_ASR_MODEL_SHA256 = (
+    "4677cbd30988d63ed3e777f6a42a1e5260a3865317f6e15e488bef40954f7054"
+)
+# Keep the evidence provenance identical to the adapter and deployment
+# manifest; the source tree records the corresponding FireRedTeam release.
+FIRERED_ASR_SOURCE_VERSION = "ModelScope:xukaituo/FireRedASR2-AED@shared-20260831"
 FIRERED_VAD_MODEL_SHA256 = (
     "63f4fb1b00a6b8607c118dd48efc18d5e40d67d99b7bf9aa7a8d61540cf23d71"
 )
@@ -152,6 +167,7 @@ class SpeakerEvidenceConfig:
     def __init__(
         self,
         moss_config=None,
+        firered_asr_config=None,
         vad_config=None,
         campplus_config=None,
         whisper_config=None,
@@ -163,6 +179,7 @@ class SpeakerEvidenceConfig:
         claim_policy=None,
         expanded_run_profile=None,
         enable_moss=None,
+        enable_firered_asr=None,
         enable_vad=None,
         enable_campplus=None,
         enable_whisper=None,
@@ -189,6 +206,7 @@ class SpeakerEvidenceConfig:
             for name, enabled in expanded["models"].items()
         }
         self.moss_config = moss_config or MossDiarizeConfig()
+        self.firered_asr_config = firered_asr_config
         self.vad_config = vad_config or FireRedVadConfig()
         self.campplus_config = campplus_config
         self.whisper_config = whisper_config
@@ -198,6 +216,7 @@ class SpeakerEvidenceConfig:
         self.brouhaha_config = brouhaha_config
         configs = {
             "moss": self.moss_config,
+            "firered_asr": self.firered_asr_config,
             "vad": self.vad_config,
             "campplus": self.campplus_config,
             "whisper": self.whisper_config,
@@ -208,6 +227,7 @@ class SpeakerEvidenceConfig:
         }
         overrides = {
             "moss": enable_moss,
+            "firered_asr": enable_firered_asr,
             "vad": enable_vad,
             "campplus": enable_campplus,
             "whisper": enable_whisper,
@@ -276,6 +296,7 @@ def default_speaker_evidence_config(
     vad_config=None,
     brouhaha_config=None,
     verify_model_assets=True,
+    firered_asr_config=None,
 ):
     """Build the shared speaker-v2 configuration used by the main pipeline."""
 
@@ -289,6 +310,26 @@ def default_speaker_evidence_config(
             device="cuda:0",
             torch_dtype="float16",
             max_new_tokens=2048,
+        ),
+        firered_asr_config=(
+            firered_asr_config
+            or FireRedAsrConfig(
+                model_dir=os.environ.get(
+                    "TAGGER_FIRERED_ASR_MODEL",
+                    str(DEFAULT_FIRERED_ASR_MODEL),
+                ),
+                source_dir=os.environ.get(
+                    "TAGGER_FIRERED_ASR_SOURCE",
+                    str(DEFAULT_FIRERED_ASR_SOURCE),
+                ),
+                subprocess_python=os.environ.get(
+                    "TAGGER_FIRERED_ASR_PYTHON",
+                    str(DEFAULT_FIRERED_ASR_PYTHON),
+                ),
+                device=os.environ.get("TAGGER_FIRERED_ASR_DEVICE", "cuda:1"),
+                use_half=False,
+                beam_size=3,
+            )
         ),
         vad_config=vad_config or FireRedVadConfig(),
         campplus_config=CampPlusIdentityConfig(
@@ -343,6 +384,7 @@ def run_manifest(
     model_workers = max(1, int(model_workers))
     slots = {
         "moss_diarize_estimate": model_workers,
+        "firered_asr_estimate": model_workers,
         "whisper_lexical_estimate": model_workers,
         "sortformer_timeline_estimate": model_workers,
         "firered_vad_detect": model_workers,
@@ -553,7 +595,8 @@ def run_record(
     audio_sha256 = sha256_file(audio_path)
 
     # This is the complete inference view. Native metadata and the supplied
-    # transcript are deliberately absent; MOSS must generate its own text.
+    # transcript are deliberately absent; both ASR paths generate their own
+    # text from the sample audio.
     inference_scope = {
         "sample_id": sample_id,
         "audio_path": str(audio_path),
@@ -563,33 +606,68 @@ def run_record(
         "channels": audio_info.channels,
     }
     evidence = []
-    if config.enable_moss:
-        evidence.append(
-            collect_moss_evidence(
-                inference_scope,
-                config.moss_config,
-                context=context,
-                verify_model_asset=config.verify_model_assets,
-            )
+    # MOSS and FireRed are independent ASR paths.  Submit both before waiting
+    # so their model inference overlaps when both are enabled; each model has
+    # its own subprocess pool and CUDA device configuration.
+    asr_futures = {}
+    asr_executor = None
+    if config.enable_moss and config.enable_firered_asr:
+        asr_executor = ThreadPoolExecutor(max_workers=2)
+        asr_futures["moss"] = asr_executor.submit(
+            _collect_asr_evidence,
+            "moss",
+            inference_scope,
+            config.moss_config,
+            context,
+            config.verify_model_assets,
         )
-    else:
-        evidence.append(
-            build_missing_evidence(
-                sample_id,
-                duration_sec,
-                "speaker_timeline",
-                "moss_transcribe_diarize",
-                MOSS_SOURCE_VERSION,
-                "joint_asr_diarizer",
-                [
-                    "speaker_timeline",
-                    "joint_speaker_text",
-                    "speaker_count_candidate",
-                ],
-                ["G_moss_td_0_9b"],
-                "disabled by run configuration",
-            )
+        asr_futures["firered_asr"] = asr_executor.submit(
+            _collect_asr_evidence,
+            "firered_asr",
+            inference_scope,
+            config.firered_asr_config,
+            context,
+            config.verify_model_assets,
         )
+    try:
+        if config.enable_moss:
+            moss_evidence = (
+                asr_futures["moss"].result()
+                if "moss" in asr_futures
+                else _collect_asr_evidence(
+                    "moss",
+                    inference_scope,
+                    config.moss_config,
+                    context=context,
+                    verify_model_asset=config.verify_model_assets,
+                )
+            )
+        else:
+            moss_evidence = _missing_asr_evidence(
+                "moss", inference_scope, "disabled by run configuration"
+            )
+        evidence.append(moss_evidence)
+
+        if config.enable_firered_asr:
+            firered_evidence = (
+                asr_futures["firered_asr"].result()
+                if "firered_asr" in asr_futures
+                else _collect_asr_evidence(
+                    "firered_asr",
+                    inference_scope,
+                    config.firered_asr_config,
+                    context=context,
+                    verify_model_asset=config.verify_model_assets,
+                )
+            )
+        else:
+            firered_evidence = _missing_asr_evidence(
+                "firered_asr", inference_scope, "disabled by run configuration"
+            )
+        evidence.append(firered_evidence)
+    finally:
+        if asr_executor is not None:
+            asr_executor.shutdown(wait=True)
 
     if config.whisper_config is not None:
         if config.enable_whisper:
@@ -907,7 +985,12 @@ def run_record(
                 )
     fusion["speaker_text_tracks"] = native_text_tracks + projected_text_tracks
     fusion["speaker_text_comparisons"] = text_comparisons
-    speaker_asr_transcript = _speaker_asr_transcript(timelines)
+    asr_selection = _select_speaker_asr(evidence)
+    # Keep both raw ASR candidates in the fusion artifact.  The selected text
+    # is an adapter output and does not participate in speaker-event claims.
+    fusion["asr_route"] = copy.deepcopy(asr_selection["route"])
+    fusion["asr_candidates"] = copy.deepcopy(asr_selection["candidates"])
+    speaker_asr_transcript = asr_selection["text"]
 
     # Evaluation happens strictly after evidence collection and resolution.
     if config.score_native:
@@ -936,34 +1019,263 @@ def run_record(
         "policy_hash": claim_policy_hash(config.claim_policy),
         "native_scored": bool(config.score_native),
         "speaker_asr_transcript": speaker_asr_transcript,
+        "asr_selected_source": asr_selection["route"].get("selected_source"),
+        "language_route": asr_selection["route"].get("language_route"),
+        "language_route_reason": asr_selection["route"].get("reason"),
+        "asr_route": asr_selection["route"],
     }
 
 
-def _speaker_asr_transcript(timelines):
-    """Return the parsed text produced by the joint MOSS speaker/ASR source."""
+def _collect_asr_evidence(source, scope, config, context, verify_model_asset):
+    """Run one ASR collector and convert unexpected failures to evidence."""
 
-    for evidence in timelines:
-        source = evidence.get("source", {})
-        if source.get("name") != "moss_transcribe_diarize":
+    try:
+        if source == "moss":
+            return collect_moss_evidence(
+                scope,
+                config,
+                context=context,
+                verify_model_asset=verify_model_asset,
+            )
+        if source == "firered_asr":
+            return collect_firered_asr_evidence(
+                scope,
+                config,
+                context=context,
+                verify_model_asset=verify_model_asset,
+            )
+        raise ValueError("unknown ASR collector: %s" % source)
+    except Exception as exc:  # noqa: BLE001 - preserve the other ASR path.
+        return _missing_asr_evidence(
+            source,
+            scope,
+            "%s: %s" % (exc.__class__.__name__, exc),
+        )
+
+
+def _missing_asr_evidence(source, scope, reason):
+    if source == "moss":
+        return build_missing_evidence(
+            scope["sample_id"],
+            scope["duration_sec"],
+            "speaker_timeline",
+            "moss_transcribe_diarize",
+            MOSS_SOURCE_VERSION,
+            "joint_asr_diarizer",
+            [
+                "speaker_timeline",
+                "joint_speaker_text",
+                "speaker_count_candidate",
+            ],
+            ["G_moss_td_0_9b"],
+            reason,
+        )
+    if source == "firered_asr":
+        return build_missing_evidence(
+            scope["sample_id"],
+            scope["duration_sec"],
+            "asr_transcript",
+            "fireredasr2_aed",
+            FIRERED_ASR_SOURCE_VERSION,
+            "asr",
+            ["asr_transcript", "lexical_timeline", "lexical_presence_diagnostic"],
+            ["G_firered_asr2_aed"],
+            reason,
+        )
+    raise ValueError("unknown ASR source: %s" % source)
+
+
+def _speaker_asr_transcript(timelines):
+    """Return the routed ASR text (compatibility helper for older callers)."""
+
+    return _select_speaker_asr(timelines)["text"]
+
+
+def _select_speaker_asr(evidence):
+    """Select MOSS for pure English and FireRed for every other route.
+
+    FireRed's sentence language metadata is authoritative when present.  The
+    fallback script check intentionally errs toward FireRed: any non-ASCII
+    alphabetic character (CJK, accented Latin, Cyrillic, etc.) or an unknown
+    script is treated as non-English.  Availability fallbacks are recorded so
+    a failed model cannot be mistaken for a language decision.
+    """
+
+    moss = _asr_candidate(evidence, "moss_transcribe_diarize")
+    firered = _asr_candidate(evidence, "fireredasr2_aed")
+    language_route, language_reason, language_source = _classify_asr_language(
+        firered.get("text", ""),
+        firered.get("language"),
+        firered.get("language_confidence"),
+    )
+
+    selected = None
+    reason = language_reason
+    availability_fallback = False
+    if firered["usable"]:
+        if language_route == "pure_english" and moss["usable"]:
+            selected = moss
+            reason = "%s; MOSS is selected for pure English" % language_reason
+        else:
+            selected = firered
+            if language_route == "pure_english":
+                reason = "%s; MOSS unavailable, FireRed fallback" % language_reason
+                availability_fallback = True
+            else:
+                reason = "%s; FireRed selected" % language_reason
+                if not moss["usable"]:
+                    reason = "%s; MOSS unavailable, FireRed availability fallback" % reason
+                    availability_fallback = True
+    elif moss["usable"]:
+        selected = moss
+        reason = "FireRed unavailable; MOSS availability fallback"
+        language_route = "unknown"
+        language_source = "availability_fallback"
+        availability_fallback = True
+    else:
+        language_route = "unknown"
+        language_source = "availability_fallback"
+        reason = "both ASR candidates unavailable"
+
+    route = {
+        "schema_version": "speaker_asr_route.v1",
+        "strategy": "moss_for_pure_english_else_firered",
+        "language_route": language_route,
+        "language_source": language_source,
+        "detected_language": firered.get("language"),
+        "language_confidence": firered.get("language_confidence"),
+        "language_error": firered.get("language_error"),
+        "selected_source": selected.get("source") if selected else None,
+        "selected_model": (
+            "moss" if selected is moss else "firered" if selected is firered else None
+        ),
+        "reason": reason,
+        "fallback": availability_fallback,
+    }
+    return {
+        "text": selected.get("text", "") if selected else "",
+        "route": route,
+        "candidates": {"moss": moss, "firered": firered},
+    }
+
+
+def _asr_candidate(evidence, source_name):
+    for item in evidence or []:
+        if item.get("source", {}).get("name") != source_name:
             continue
-        payload = evidence.get("payload", {})
-        # This value is built directly from the original MOSS segments before
-        # the speaker timeline merges nearby turns for claim resolution.
-        asr_transcript = payload.get("asr_transcript", "")
-        if isinstance(asr_transcript, str) and asr_transcript.strip():
-            return asr_transcript.strip()
-        # Fall back for older evidence that did not persist asr_transcript.
-        segments = payload.get("timeline_summary", {}).get("segments", [])
-        text = _join_segment_text(segments)
-        if text:
-            return text
-        raw_text = payload.get("model_output_text", "")
-        if isinstance(raw_text, str) and raw_text.strip():
-            parsed_segments = parse_moss_text(raw_text)
-            parsed_text = _join_segment_text(parsed_segments)
-            if parsed_text:
-                return parsed_text
-    return ""
+        payload = item.get("payload", {})
+        text = ""
+        language = None
+        language_confidence = None
+        language_error = None
+        if source_name == "moss_transcribe_diarize":
+            text = payload.get("asr_transcript", "")
+            if not isinstance(text, str) or not text.strip():
+                text = _join_segment_text(
+                    payload.get("timeline_summary", {}).get("segments", [])
+                )
+            if not text:
+                raw_text = payload.get("model_output_text", "")
+                if isinstance(raw_text, str) and raw_text.strip():
+                    text = _join_segment_text(parse_moss_text(raw_text))
+        else:
+            text = payload.get("asr_transcript", payload.get("text", ""))
+            language = payload.get("language") or payload.get("lang")
+            language_confidence = payload.get(
+                "language_confidence", payload.get("lang_confidence")
+            )
+            language_error = payload.get("language_error")
+            if not text:
+                text = _firered_text(payload)
+        if not isinstance(text, str):
+            text = str(text) if text is not None else ""
+        status = item.get("status", "estimated")
+        usable = (
+            status in ("observed", "estimated")
+            and item.get("quality", {}).get("usable", True) is not False
+            and bool(text.strip())
+        )
+        return {
+            "source": source_name,
+            "evidence_id": item.get("evidence_id"),
+            "status": status,
+            "usable": bool(usable),
+            "text": text.strip(),
+            "language": language,
+            "language_confidence": language_confidence,
+            "language_error": language_error,
+            "quality": copy.deepcopy(item.get("quality", {})),
+        }
+    return {
+        "source": source_name,
+        "evidence_id": None,
+        "status": "missing",
+        "usable": False,
+        "text": "",
+        "language": None,
+        "language_confidence": None,
+        "language_error": None,
+        "quality": {},
+    }
+
+
+def _classify_asr_language(text, language=None, language_confidence=None):
+    """Classify the FireRed candidate for the strict ASR route.
+
+    Only an explicit FireRed LID ``en`` result plus an ASCII alphabetic
+    transcript is sufficient for the MOSS route.  A missing LID result is
+    deliberately treated as unknown and therefore selects FireRed; a script
+    check remains a conservative guard against code-switching or malformed
+    LID output.
+    """
+
+    text = text if isinstance(text, str) else ""
+    letters = [char for char in text if char.isalpha()]
+    if any(
+        not (
+            ord(char) < 128
+            and ("A" <= char <= "Z" or "a" <= char <= "z")
+        )
+        for char in letters
+    ):
+        return (
+            "non_english_or_mixed",
+            "FireRed transcript contains non-ASCII alphabetic characters",
+            "firered_transcript_script_heuristic",
+        )
+    normalized = str(language or "").strip().lower()
+    if normalized and not (normalized == "en" or normalized.startswith("en ") or normalized.startswith("en-") or normalized.startswith("en_")):
+        return (
+            "non_english_or_mixed",
+            "FireRed language metadata is %s" % normalized,
+            "firered_lid",
+        )
+    if normalized and letters:
+        confidence_note = ""
+        if isinstance(language_confidence, (int, float)) and not isinstance(language_confidence, bool):
+            confidence_note = " (confidence %.3f)" % float(language_confidence)
+        return (
+            "pure_english",
+            "FireRed LID metadata is en%s and transcript is ASCII-English" % confidence_note,
+            "firered_lid",
+        )
+    if normalized:
+        return (
+            "unknown",
+            "FireRed LID metadata is en but transcript has no alphabetic signal",
+            "firered_lid",
+        )
+    if letters:
+        return (
+            "unknown",
+            "FireRed LID metadata is unavailable; English is not verified",
+            "firered_lid_unavailable",
+        )
+    return (
+        "unknown",
+        "FireRed transcript has no alphabetic language signal",
+        "fallback",
+    )
 
 
 def _join_segment_text(segments):
@@ -1094,6 +1406,201 @@ def collect_moss_evidence(
                 "preprocessing": "openmoss_processor_16khz_full_sample",
             },
         )
+
+
+def collect_firered_asr_evidence(
+    scope, config, context=None, verify_model_asset=True
+):
+    """Collect FireRedASR2-AED as an ASR-only, non-diarization source.
+
+    FireRed is deliberately kept out of the speaker timeline vote.  Its text
+    is retained as an independent lexical candidate and is selected for the
+    public ``speaker.asr_transcript`` only when the language route requires
+    it (or when MOSS is unavailable).
+    """
+
+    verified_hash = FIRERED_ASR_MODEL_SHA256 if verify_model_asset else None
+    model_dir = getattr(config, "model_dir", "")
+    source_dir = getattr(config, "source_dir", "")
+    runtime = {
+        "python": getattr(config, "subprocess_python", ""),
+        "model_path": model_dir,
+        "source_path": source_dir,
+        "model_sha256": verified_hash,
+        "device": getattr(config, "device", "auto"),
+        "full_sample_invocation": True,
+        "audio_sha256": scope["audio_sha256"],
+    }
+    applicability = {
+        "audio_sha256": scope["audio_sha256"],
+        "model_sha256": verified_hash,
+        "source_dir": source_dir,
+        "beam_size": getattr(config, "beam_size", None),
+        "use_half": bool(getattr(config, "use_half", False)),
+        "preprocessing": "soundfile_pcm16_16khz_mono",
+        "not_a_speaker_timeline": True,
+    }
+    started = time.time()
+    try:
+        if verify_model_asset:
+            _verify_model_asset(
+                Path(model_dir).expanduser(),
+                "model.pth.tar",
+                FIRERED_ASR_MODEL_SHA256,
+            )
+        runtime_config = config
+        if isinstance(config, FireRedAsrConfig) and (
+            config.verify_lid_model_asset != bool(verify_model_asset)
+        ):
+            runtime_config_record = config.to_record()
+            runtime_config_record["verify_lid_model_asset"] = bool(
+                verify_model_asset
+            )
+            runtime_config = FireRedAsrConfig(**runtime_config_record)
+        result = run_firered_asr(
+            scope["audio_path"], config=runtime_config, context=context
+        )
+        raw = result.value if hasattr(result, "value") else result
+        if not isinstance(raw, dict):
+            raise ValueError("FireRed ASR returned a non-object result")
+        text = _firered_text(raw)
+        units = _firered_lexical_units(raw, scope["duration_sec"])
+        runtime.update(raw.get("runtime", {}))
+        runtime["elapsed_total_sec"] = round(time.time() - started, 6)
+        language, language_confidence = _firered_language(raw)
+        stable_raw_output = copy.deepcopy(raw)
+        # Runtime timing/device fields are volatile and belong in the evidence
+        # runtime envelope, not in the content used to derive evidence_id.
+        stable_raw_output.pop("runtime", None)
+        payload = {
+            "text": text,
+            "asr_transcript": text,
+            "confidence": raw.get("confidence"),
+            "language": language,
+            "language_confidence": language_confidence,
+            "language_error": raw.get("language_error"),
+            "sentences": raw.get("sentences", []),
+            "timestamps": raw.get("timestamps", raw.get("timestamp", [])),
+            "lexical_units": units,
+            "raw_output": stable_raw_output,
+            "not_a_speaker_timeline": True,
+            "not_a_speaker_event_vote": True,
+        }
+        usable = bool(text or units)
+        return build_evidence(
+            sample_id=scope["sample_id"],
+            duration_sec=scope["duration_sec"],
+            evidence_type="asr_transcript",
+            source_name="fireredasr2_aed",
+            source_version=FIRERED_ASR_SOURCE_VERSION,
+            source_kind="asr",
+            capabilities=[
+                "asr_transcript",
+                "lexical_timeline",
+                "lexical_presence_diagnostic",
+            ],
+            dependency_groups=["G_firered_asr2_aed"],
+            payload=payload,
+            status="estimated",
+            quality={
+                "usable": usable,
+                "full_scope_invocation": True,
+                "model_asset_verified": bool(verify_model_asset),
+                "timestamp_status": "native" if units else "none",
+            },
+            runtime=runtime,
+            applicability=applicability,
+        )
+    except Exception as exc:
+        runtime["elapsed_total_sec"] = round(time.time() - started, 6)
+        return build_missing_evidence(
+            scope["sample_id"],
+            scope["duration_sec"],
+            "asr_transcript",
+            "fireredasr2_aed",
+            FIRERED_ASR_SOURCE_VERSION,
+            "asr",
+            ["asr_transcript", "lexical_timeline", "lexical_presence_diagnostic"],
+            ["G_firered_asr2_aed"],
+            "%s: %s" % (exc.__class__.__name__, exc),
+            runtime=runtime,
+            applicability=applicability,
+        )
+
+
+def _firered_text(raw):
+    text = raw.get("text", "")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    sentences = raw.get("sentences", [])
+    if isinstance(sentences, list):
+        parts = [
+            item.get("text", "").strip()
+            for item in sentences
+            if isinstance(item, dict)
+            and isinstance(item.get("text"), str)
+            and item.get("text", "").strip()
+        ]
+        return " ".join(parts).strip()
+    return ""
+
+
+def _firered_language(raw):
+    language = raw.get("language") or raw.get("lang")
+    confidence = raw.get("language_confidence", raw.get("lang_confidence"))
+    if not language:
+        sentences = raw.get("sentences", [])
+        if isinstance(sentences, list):
+            for item in sentences:
+                if isinstance(item, dict) and item.get("lang"):
+                    language = item.get("lang")
+                    confidence = item.get("lang_confidence", confidence)
+                    break
+    if not isinstance(language, str) or not language.strip():
+        return None, None
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        confidence = None
+    return language.strip(), confidence
+
+
+def _firered_lexical_units(raw, duration_sec):
+    """Normalize FireRed native timestamp variants to lexical.py's schema."""
+
+    candidates = raw.get("timestamps", raw.get("timestamp", []))
+    if not isinstance(candidates, list):
+        candidates = []
+    units = []
+    for index, item in enumerate(candidates):
+        token = start = end = None
+        if isinstance(item, dict):
+            token = item.get("text", item.get("token"))
+            start = item.get("start_s", item.get("start_sec", item.get("start")))
+            end = item.get("end_s", item.get("end_sec", item.get("end")))
+            if start is None and item.get("start_ms") is not None:
+                start = float(item["start_ms"]) / 1000.0
+            if end is None and item.get("end_ms") is not None:
+                end = float(item["end_ms"]) / 1000.0
+        elif isinstance(item, (list, tuple)) and len(item) >= 3:
+            token, start, end = item[0], item[1], item[2]
+        if not isinstance(token, str) or not token.strip():
+            continue
+        try:
+            start = max(0.0, float(start))
+            end = min(float(duration_sec), float(end))
+        except (TypeError, ValueError):
+            continue
+        if end <= start:
+            continue
+        units.append(
+            {
+                "unit_id": "firered_%06d" % index,
+                "start_sec": round(start, 6),
+                "end_sec": round(end, 6),
+                "text": token.strip(),
+            }
+        )
+    units.sort(key=lambda item: (item["start_sec"], item["end_sec"], item["unit_id"]))
+    return units
 
 
 def collect_whisper_evidence(

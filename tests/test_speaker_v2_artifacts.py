@@ -133,7 +133,7 @@ class SpeakerV2ArtifactsTest(unittest.TestCase):
             compat_metadata["speaker"], evaluation_output["speaker"]
         )
 
-    def test_run_manifest_records_policy_and_all_eight_models(self):
+    def test_run_manifest_records_policy_and_all_nine_models(self):
         config = StubConfig()
         config.run_profile = "quality-shadow"
         config.claim_policy = expand_profile("quality-shadow")["claim_policy"]
@@ -197,6 +197,7 @@ class SpeakerV2ArtifactsTest(unittest.TestCase):
             set(value["models"]),
             {
                 "moss",
+                "firered_asr",
                 "vad",
                 "campplus",
                 "whisper",

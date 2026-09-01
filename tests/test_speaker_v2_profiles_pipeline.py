@@ -371,6 +371,33 @@ class SpeakerV2ProfilesTest(unittest.TestCase):
         }
         self.assertNotIn("--certification-gate-enable", options)
 
+    def test_cli_exposes_firered_lid_routing_controls(self):
+        captured = {}
+
+        def fake_run_manifest(_manifest, _output_dir, config, **_kwargs):
+            captured["config"] = config
+            return {"failure_count": 0, "results": []}
+
+        with mock.patch.object(
+            speaker_v2_cli, "run_manifest", side_effect=fake_run_manifest
+        ), mock.patch("builtins.print"):
+            status = speaker_v2_cli.main(
+                [
+                    "--manifest",
+                    "input.jsonl",
+                    "--output-dir",
+                    "output",
+                    "--firered-asr-disable-lid",
+                    "--firered-asr-lid-model",
+                    "/models/FireRedLID",
+                ]
+            )
+
+        self.assertEqual(status, 0)
+        config = captured["config"].firered_asr_config
+        self.assertFalse(config.enable_lid)
+        self.assertEqual(config.lid_model_dir, "/models/FireRedLID")
+
     def test_identity_candidate_uses_count_policy_not_evidence_order(self):
         moss, sortformer, pyannote = source_timelines()
         policy = expand_profile("quality-shadow")["claim_policy"]

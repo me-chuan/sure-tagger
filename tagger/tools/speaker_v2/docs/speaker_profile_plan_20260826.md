@@ -12,8 +12,8 @@
 
 建议分两层推进：
 
-1. **MVP 不引入新模型**：复用现有 MOSS/Sortformer/Pyannote 时间轴、MOSS 联合
-   转写、Whisper lexical timeline、Brouhaha/FireRedVAD speech coverage，加一个
+1. **MVP 不引入新的模型家族**：复用现有 MOSS/Sortformer/Pyannote 时间轴、MOSS
+   与 FireRedASR2-AED 双路转写、Whisper lexical timeline、Brouhaha/FireRedVAD speech coverage，加一个
    确定性声学统计适配器，先发布每个说话人的语速、音高档位和相对音量。
 2. **语义画像按需引入模型**：年龄、性别、情绪、口音、`voice_traits`、
    `delivery_style` 等不应由现有 diarizer、ECAPA/CAM++ 或 DASS 越权推断。只有
@@ -29,6 +29,7 @@ captioner 对齐，可在导出层将 `speech_rate.band` 映射为 captioner 的
 | 现有来源 | 当前能力 | 可复用到画像 | 不能直接承担 |
 | --- | --- | --- | --- |
 | MOSS Transcribe-Diarize | 联合 ASR、说话人、片段起止时间；`segments` 带 `speaker_id` 和文本 | 说话人归属、文本单位计数、片段级语速 | 没有稳定的逐词时间戳；ASR 文本和说话人共享一个模型依赖组 |
+| FireRedASR2-AED | 独立 ASR、confidence、字符/词 timestamp；支持中文和英文 | 非英文/混合语言 transcript、独立 lexical audit 和语言路由 | 不提供 speaker ID/timeline；不参与 C/M/O/X claim |
 | Sortformer | 独立 speaker timeline、概率和活动片段 | 作为 `speaker_count` 主路由及画像的时间轴候选 | 最多 4 个 slot，不能证明全局说话人数上界；没有画像属性 |
 | Pyannote Community-1 | raw/exclusive diarization、重叠区间 | overlap 排除、活动区间交叉检查 | 当前 license review pending；不提供年龄/情绪/口音 |
 | Whisper Base lexical | 可选 lexical units 和粗/实验时间戳；已有 projection/assignment 工具 | 作为 MOSS 文本的独立时间证据和语速质量 guard | 默认不是逐词生产时钟；不能作为 speaker event vote |
@@ -40,7 +41,10 @@ captioner 对齐，可在导出层将 `speech_rate.band` 映射为 captioner 的
 实现依据：speaker v2 当前 resolver 只发布 `speaker_count`、`multi_speaker`、
 `speaker_change_count`、`speaker_change`、`overlap_ratio`、`speaker_overlap`；
 时间轴摘要已经包含 `activity_segments`、`speaker_ids`、重叠区间和切换候选点。
-MOSS 证据还保留 `asr_transcript`、带文本的 segments 以及 speaker-text track。
+MOSS 证据还保留 `asr_transcript`、带文本的 segments 以及 speaker-text track；FireRed
+证据保留独立 transcript、confidence、timestamp、同源 LID 语言和原始输出。两路候选
+均在 speaker stage 运行，只有 FireRed LID 明确为 `en` 且文本为 ASCII-English 时选
+MOSS，其它语言或 unknown 选 FireRed。
 
 ## 3. Captioner schema 参考与边界
 
@@ -321,8 +325,8 @@ band 在 dev 上达到预设 macro-F1 目标（建议 ≥0.75），数值误差�
 | `tests/test_speaker_v2_profiles_pipeline.py` | profile 与 profile model overrides、失败隔离、artifact parity |
 | `docs/`（本目录） | 维护 benchmark、阈值、模型清单、license 和发布记录 |
 
-最小集成测试包括：单说话人、双说话人、换人、重叠、无语音、无文本、MOSS 失败转
-Sortformer、Sortformer 失败转 MOSS、VAD 失败、8 kHz、双声道降混、短片段和 profile
+最小集成测试包括：单说话人、双说话人、换人、重叠、无语音、无文本、MOSS/FireRed
+双路并发与语言路由、一路 ASR 失败回退、MOSS 失败转 Sortformer、Sortformer 失败转 MOSS、VAD 失败、8 kHz、双声道降混、短片段和 profile
 计算异常。所有测试都应确认 native metadata、captioner 输出和 reference transcript
 没有进入 inference/resolver。
 

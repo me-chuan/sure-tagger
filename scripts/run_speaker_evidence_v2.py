@@ -29,6 +29,9 @@ from tagger.tools.basic_acoustic.firered_vad_silence_detector import (  # noqa: 
     FireRedVadConfig,
 )
 from tagger.tools.speaker.moss_diarizer import MossDiarizeConfig  # noqa: E402
+from tagger.tools.speaker_v2.firered_asr import (  # noqa: E402
+    FireRedAsrConfig,
+)
 from tagger.tools.speaker_v2.campplus_identity import (  # noqa: E402
     CampPlusIdentityConfig,
 )
@@ -55,6 +58,11 @@ DEFAULT_MOSS_PYTHON = ROOT / ".runtime" / (
     "moss_transcribe_diarize_py311_torch280_cu128_v1/bin/python"
 )
 DEFAULT_MOSS_MODEL = ROOT / "models" / "MOSS-Transcribe-Diarize-model"
+DEFAULT_FIRERED_ASR_PYTHON = ROOT / ".runtime" / (
+    "fireredasr2_aed_py311_torch280_cu128_v1/bin/python"
+)
+DEFAULT_FIRERED_ASR_MODEL = ROOT / "models" / "FireRedASR2-AED"
+DEFAULT_FIRERED_ASR_SOURCE = ROOT / "models" / "FireRedASR2S"
 DEFAULT_VAD_PYTHON = ROOT / ".runtime" / "fireredvad_rebuild_py310/bin/python"
 DEFAULT_VAD_MODEL = ROOT / "models" / "FireRedVAD" / (
     "pretrained_models/FireRedVAD/VAD"
@@ -141,6 +149,7 @@ def build_arg_parser():
     )
     for option in (
         "moss",
+        "firered-asr",
         "whisper",
         "sortformer",
         "pyannote",
@@ -170,6 +179,30 @@ def build_arg_parser():
     parser.add_argument("--moss-torch-dtype", default="float16")
     parser.add_argument("--moss-max-new-tokens", type=int, default=2048)
     parser.add_argument("--moss-prompt", default="")
+    _add_model_toggle(parser, "firered-asr", "firered_asr_enabled")
+    parser.add_argument(
+        "--firered-asr-python", default=str(DEFAULT_FIRERED_ASR_PYTHON)
+    )
+    parser.add_argument(
+        "--firered-asr-model", default=str(DEFAULT_FIRERED_ASR_MODEL)
+    )
+    parser.add_argument(
+        "--firered-asr-source", default=str(DEFAULT_FIRERED_ASR_SOURCE)
+    )
+    parser.add_argument("--firered-asr-device", default="cuda:1")
+    parser.add_argument("--firered-asr-beam-size", type=int, default=3)
+    parser.add_argument("--firered-asr-half", action="store_true")
+    parser.add_argument("--firered-asr-timeout-sec", type=int, default=600)
+    parser.add_argument(
+        "--firered-asr-disable-lid",
+        action="store_true",
+        help="Disable FireRed LID; unknown-language transcripts stay on FireRed.",
+    )
+    parser.add_argument(
+        "--firered-asr-lid-model",
+        default=None,
+        help="FireRedLID model directory; defaults beside FireRedASR2S.",
+    )
     _add_model_toggle(parser, "vad", "vad_enabled")
     parser.add_argument("--vad-python", default=str(DEFAULT_VAD_PYTHON))
     parser.add_argument("--vad-model", default=str(DEFAULT_VAD_MODEL))
@@ -255,6 +288,7 @@ def main(argv=None):
     )
     model_overrides = {
         "moss": args.moss_enabled,
+        "firered_asr": args.firered_asr_enabled,
         "vad": args.vad_enabled,
         "campplus": args.campplus_enabled,
         "whisper": args.whisper_enabled,
@@ -279,6 +313,17 @@ def main(argv=None):
         torch_dtype=args.moss_torch_dtype,
         max_new_tokens=args.moss_max_new_tokens,
         prompt=args.moss_prompt,
+    )
+    firered_asr_config = FireRedAsrConfig(
+        model_dir=args.firered_asr_model,
+        source_dir=args.firered_asr_source,
+        subprocess_python=args.firered_asr_python,
+        device=args.firered_asr_device,
+        beam_size=args.firered_asr_beam_size,
+        use_half=args.firered_asr_half,
+        timeout_sec=args.firered_asr_timeout_sec,
+        enable_lid=not args.firered_asr_disable_lid,
+        lid_model_dir=args.firered_asr_lid_model,
     )
     vad_config = FireRedVadConfig(
         model_dir=args.vad_model,
@@ -342,6 +387,7 @@ def main(argv=None):
     )
     config = SpeakerEvidenceConfig(
         moss_config=moss_config,
+        firered_asr_config=firered_asr_config,
         vad_config=vad_config,
         campplus_config=campplus_config,
         whisper_config=whisper_config,
@@ -350,6 +396,7 @@ def main(argv=None):
         ecapa_config=ecapa_config,
         brouhaha_config=brouhaha_config,
         enable_moss=args.moss_enabled,
+        enable_firered_asr=args.firered_asr_enabled,
         enable_vad=args.vad_enabled,
         enable_campplus=args.campplus_enabled,
         enable_whisper=args.whisper_enabled,
@@ -377,6 +424,7 @@ def main(argv=None):
             key: value
             for key, value in {
                 "moss_diarize_estimate": args.moss_workers,
+                "firered_asr_estimate": args.firered_asr_workers,
                 "whisper_lexical_estimate": args.whisper_workers,
                 "sortformer_timeline_estimate": args.sortformer_workers,
                 "pyannote_community1_estimate": args.pyannote_workers,

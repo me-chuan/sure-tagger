@@ -7,7 +7,7 @@ from tagger.tools.speaker_v2.contracts import canonical_json
 
 
 POLICY_SCHEMA_VERSION = "speaker_v2.claim_policy.v1"
-POLICY_VERSION = "speaker_v2.claim_policy.20260817.1"
+POLICY_VERSION = "speaker_v2.claim_policy.20260831.1"
 PROFILE_SCHEMA_VERSION = "speaker_v2.run_profile.v1"
 
 CLAIMS = (
@@ -20,6 +20,7 @@ CLAIMS = (
 MOSS_SOURCE = "moss_transcribe_diarize"
 SORTFORMER_SOURCE = "nvidia_streaming_sortformer_4spk_v2"
 PYANNOTE_SOURCE = "pyannote_community_1"
+FIRERED_ASR_SOURCE = "fireredasr2_aed"
 
 SOURCE_REGISTRY = {
     MOSS_SOURCE: {"capability": "speaker_timeline"},
@@ -34,10 +35,12 @@ SOURCE_REGISTRY = {
         "capability": "speaker_identity_comparison"
     },
     "whisper_base_lexical_clock": {"capability": "lexical_timeline"},
+    FIRERED_ASR_SOURCE: {"capability": "asr_transcript"},
 }
 
 MODEL_KEYS = (
     "moss",
+    "firered_asr",
     "vad",
     "campplus",
     "whisper",
@@ -77,6 +80,7 @@ _PROFILES = {
         "description": "Frozen all-timeline v2-shadow behavior",
         "models": {
             "moss": True,
+            "firered_asr": True,
             "vad": True,
             "campplus": True,
             "whisper": True,
@@ -94,6 +98,7 @@ _PROFILES = {
         "description": "Measured per-claim specialists with safe shadow guards",
         "models": {
             "moss": True,
+            "firered_asr": True,
             "vad": True,
             "campplus": False,
             "whisper": False,
@@ -136,6 +141,7 @@ _PROFILES = {
         "description": "Cost-oriented profile without MOSS/legacy guards",
         "models": {
             "moss": False,
+            "firered_asr": True,
             "vad": False,
             "campplus": False,
             "whisper": False,
@@ -259,4 +265,3 @@ def _validate_claim_rule(claim_name, rule):
         raise ClaimPolicyError("%s.guard_rules must be an object" % claim_name)
     if not set(guard_rules).issubset(set(rule["guard_sources"])):
         raise ClaimPolicyError("%s guard_rules reference non-guard sources" % claim_name)
-
