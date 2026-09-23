@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: sure-tagger-survey
+    runtime: python
+    region: singapore
+    plan: starter
+    buildCommand: python3 -m compileall -q survey_v1
+    startCommand: python3 survey_v1/server.py --host 0.0.0.0 --port $PORT --db /var/data/survey.sqlite3
+    healthCheckPath: /api/stats
+    autoDeploy: true
+    disk:
+      name: sure-tagger-survey-data
+      mountPath: /var/data
+      sizeGB: 1

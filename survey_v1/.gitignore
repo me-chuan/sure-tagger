@@ -1,0 +1,5 @@
+survey.sqlite3
+survey.sqlite3-*
+__pycache__/
+*.py[cod]
+*.log
