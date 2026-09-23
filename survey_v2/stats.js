@@ -1,4 +1,4 @@
-const SESSIONS_KEY = 'sure-tagger-survey-v2-sessions-v2';
+const SESSIONS_KEY = 'sure-tagger-survey-v2-sessions-v3';
 const $ = (id) => document.getElementById(id);
 
 function readSessions() {
@@ -88,7 +88,7 @@ async function importFiles(files) {
   for (const file of files) {
     try {
       const payload = JSON.parse(await file.text());
-      if (payload.format !== 'sure-tagger-survey-v2/v2' || !payload.session_id || !Array.isArray(payload.answers)) continue;
+      if (payload.format !== 'sure-tagger-survey-v2/v3' || !payload.session_id || !Array.isArray(payload.answers)) continue;
       const answers = {};
       const submitted = [];
       payload.answers.forEach((answer) => {

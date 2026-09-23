@@ -1,7 +1,9 @@
 # 语音还原度听测 V2
 
-本问卷使用 `multi_data_representative_30_v2/synthesis_auk_dots_v2_edit_full` 筛选后的 23 个样本。
-原编号 `15、20、21、24、25、26、27` 已排除，其余样本在问卷中重新连续编号：
+本问卷使用筛选后的 28 个样本，原编号 `15、20` 已排除，其余样本在问卷中重新连续编号。
+原编号 `4、6、7、9、10、11、12、16、17、18、19、21、23、24、25、26、27、28、30`
+使用 `synthesis_auk_dots_v3_duration_full` 的生成音频，其他编号继续使用
+`synthesis_auk_dots_v2_edit_full` 的生成音频：
 
 - 参考音频：`multi_data_representative_30_v2/audio`
 - 候选 A/B：`sure_tagger/audio` 与 `captioner/audio`

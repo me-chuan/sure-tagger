@@ -1,4 +1,4 @@
-const SESSIONS_KEY = 'sure-tagger-survey-v2-sessions-v2';
+const SESSIONS_KEY = 'sure-tagger-survey-v2-sessions-v3';
 
 const state = {
   sessionId: null,
@@ -147,7 +147,7 @@ function showError(message) {
 
 function exportPayload() {
   return {
-    format: 'sure-tagger-survey-v2/v2',
+    format: 'sure-tagger-survey-v2/v3',
     session_id: state.sessionId,
     created_at: state.createdAt,
     completed_at: state.completedAt || null,
