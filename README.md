@@ -4,6 +4,15 @@ ASR dataset sample-level tagging toolkit. The project currently focuses on
 acoustic, sound-field, speaker, and language-content tags from raw-only
 sample inputs.
 
+## Listening Survey
+
+The `survey_v1/` directory contains the GitHub Pages speech-similarity
+listening survey. It compares the paired `sure_tagger` and `captioner` samples
+against the real reference audio, saves each answer in the browser's
+`localStorage`, and computes local aggregate results at `stats.html`. Completed
+responses can be exported as JSON and sent to the survey owner for manual
+import and aggregation.
+
 ## Repository Layout
 
 - `tagger/`: core schemas, tag tools, and pipelines.

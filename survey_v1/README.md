@@ -1,7 +1,7 @@
 # 语音还原度听测问卷
 
 本问卷使用 `auk_saasr_preview_v3` 的合并数据，排除第 4、11、25、27 条，保留 26 条样本。
-每位听众会获得独立的随机题目顺序，以及每题独立随机的 A/B 候选顺序。候选不显示来源名称，提交后服务器将答案写入 SQLite，并在 `/stats` 页面提供汇总统计。
+每位听众会获得独立的随机题目顺序，以及每题独立随机的 A/B 候选顺序。候选不显示来源名称，提交后答案保存在当前浏览器的 `localStorage`，并在 `stats.html` 页面提供本地汇总统计。完成后可下载 JSON 结果文件，通过邮件或其他方式发给问卷发起人；发起人可以在统计页导入多份 JSON。
 
 ## 本地启动
 
@@ -21,9 +21,7 @@ python3 survey_v1/server.py --host 127.0.0.1 --port 8765
 python3 survey_v1/server.py --db /path/to/survey.sqlite3
 ```
 
-## 在线部署
+## GitHub Pages
 
-仓库根目录的 `render.yaml` 可用于 Render Blueprint。它启动 Python Web Service，
-并把 SQLite 数据库放在持久磁盘 `/var/data/survey.sqlite3`。GitHub Pages 只能托管
-静态文件，不能运行本问卷所需的 Python API，因此不要把 `survey_v1` 直接当作
-GitHub Pages 应用访问。
+GitHub Pages 直接托管 `survey_v1/` 目录即可。问卷入口是 `survey_v1/index.html`，
+统计入口是 `survey_v1/stats.html`。本版本不依赖 Python API、Render、数据库或 Google 账号。

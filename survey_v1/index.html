@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>语音还原度听测</title>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <main class="shell" id="surveyApp">
@@ -13,7 +13,7 @@
         <p class="eyebrow">听测问卷</p>
         <h1>哪个更接近原音频？</h1>
       </div>
-      <a class="icon-link" href="/stats" aria-label="打开统计页面" title="统计">
+      <a class="icon-link" href="./stats.html" aria-label="打开统计页面" title="统计">
         <span aria-hidden="true">↗</span> 统计
       </a>
     </header>
@@ -43,7 +43,7 @@
       </div>
     </section>
 
-    <section id="loading" class="state-panel">正在准备随机听测顺序…</section>
+    <section id="loading" class="state-panel">正在准备本地听测记录…</section>
     <section id="survey" hidden>
       <div class="question-head">
         <div>
@@ -84,14 +84,18 @@
       <div class="complete-mark">✓</div>
       <p class="eyebrow">提交完成</p>
       <h2>感谢你的听测</h2>
-      <p id="completeText"></p>
+      <p id="completeText">结果只保存在当前浏览器中。</p>
       <div class="complete-actions">
-        <a class="button primary" href="/stats">查看汇总统计 →</a>
+        <button class="button primary" id="exportButton" type="button">下载结果 JSON</button>
+        <button class="button secondary" id="copyButton" type="button">复制结果</button>
+        <a class="button secondary" href="./stats.html">查看本地统计 →</a>
         <button class="button secondary" id="newSurveyButton" type="button">再做一份</button>
       </div>
+      <p id="exportStatus" class="export-status" role="status" aria-live="polite"></p>
     </section>
     <p id="errorMessage" class="error-message" hidden></p>
   </main>
-  <script src="/app.js" defer></script>
+  <script src="./data.js" defer></script>
+  <script src="./app.js" defer></script>
 </body>
 </html>

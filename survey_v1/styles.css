@@ -68,7 +68,11 @@ audio { display: block; width: 100%; height: 38px; }
 .complete-panel h2 { margin-bottom: 10px; font-size: 30px; }
 .complete-panel p:not(.eyebrow) { color: var(--muted); }
 .complete-actions { justify-content: center; margin-top: 24px; }
+.export-status, .import-status { min-height: 20px; margin: 14px 0 0; color: var(--muted); font-size: 13px; }
 .stats-shell { max-width: 1100px; }
+.stats-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 22px 0 18px; }
+.stats-tools .button { min-height: 38px; }
+.import-button { cursor: pointer; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 28px 0; }
 .metric { padding: 19px 20px; }
 .metric span { display: block; color: var(--muted); font-size: 12px; }
@@ -98,6 +102,10 @@ audio { display: block; width: 100%; height: 38px; }
   .decision-row { display: block; }
   .nav-actions { justify-content: space-between; margin-top: 17px; }
   .nav-actions .button { flex: 1; }
+  .complete-actions { flex-wrap: wrap; }
+  .complete-actions .button { flex: 1 1 45%; }
+  .stats-tools { align-items: stretch; }
+  .stats-tools .button { flex: 1 1 45%; }
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .results-panel { padding: 17px; }
   .result-counts { flex-wrap: wrap; gap: 8px 14px; }

@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent
 DATA_ROOT = ROOT.parent / "auk_saasr_preview_v3"
-STATIC_ROOT = ROOT / "static"
+STATIC_ROOT = ROOT
 DB_PATH = ROOT / "survey.sqlite3"
 EXCLUDED_POSITIONS = {4, 11, 25, 27}
 LOCK = threading.Lock()
