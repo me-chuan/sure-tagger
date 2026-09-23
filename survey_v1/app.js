@@ -170,16 +170,25 @@ function downloadExport() {
   link.download = `sure-tagger-survey-${state.sessionId}.json`;
   link.click();
   URL.revokeObjectURL(link.href);
-  $('exportStatus').textContent = '结果文件已生成，请发送给问卷发起人。';
+  ['exportStatus', 'exportProgressStatus'].forEach((id) => {
+    const status = $(id);
+    if (status) status.textContent = '结果文件已生成，请发送给问卷发起人。';
+  });
 }
 
 async function copyExport() {
   const payload = JSON.stringify(exportPayload(), null, 2);
   try {
     await navigator.clipboard.writeText(payload);
-    $('exportStatus').textContent = '结果 JSON 已复制。';
+    ['exportStatus', 'exportProgressStatus'].forEach((id) => {
+      const status = $(id);
+      if (status) status.textContent = '结果 JSON 已复制。';
+    });
   } catch (error) {
-    $('exportStatus').textContent = '浏览器不允许自动复制，请使用“下载结果 JSON”。';
+    ['exportStatus', 'exportProgressStatus'].forEach((id) => {
+      const status = $(id);
+      if (status) status.textContent = '浏览器不允许自动复制，请使用“下载结果 JSON”。';
+    });
   }
 }
 
@@ -241,6 +250,7 @@ $('prevButton').addEventListener('click', () => {
   }
 });
 $('nextButton').addEventListener('click', saveCurrentAnswer);
+$('exportProgressButton').addEventListener('click', downloadExport);
 $('exportButton').addEventListener('click', downloadExport);
 $('copyButton').addEventListener('click', copyExport);
 $('newSurveyButton').addEventListener('click', () => {
