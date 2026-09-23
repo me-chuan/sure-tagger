@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>听测统计 V2</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="shell stats-shell">
+    <header class="topbar">
+      <div><p class="eyebrow">结果汇总 V2</p><h1>语音还原度统计</h1></div>
+      <a class="icon-link" href="./index.html" aria-label="返回问卷">← 问卷</a>
+    </header>
+    <section class="stats-tools" aria-label="本地结果管理">
+      <label class="button secondary import-button" for="importResults">导入参与者 JSON</label>
+      <input id="importResults" type="file" accept="application/json,.json" multiple hidden>
+      <button class="button secondary" id="clearResultsButton" type="button">清空本地结果</button>
+      <span id="importStatus" class="import-status" role="status" aria-live="polite"></span>
+    </section>
+    <section id="statsLoading" class="state-panel">正在读取本地统计…</section>
+    <section id="statsContent" hidden>
+      <div class="metric-grid">
+        <div class="metric"><span>已完成问卷</span><strong id="completedCount">0</strong></div>
+        <div class="metric"><span>有效选择</span><strong id="responseCount">0</strong></div>
+        <div class="metric"><span>sure tagger 逐题平均胜率</span><strong id="sureRate">0%</strong></div>
+        <div class="metric"><span>captioner 逐题平均胜率</span><strong id="captionerRate">0%</strong></div>
+      </div>
+      <section class="results-panel">
+        <div class="results-heading"><div><p class="eyebrow">逐样本结果</p><h2>选择分布</h2></div><span id="sampleCount"></span></div>
+        <div id="sampleResults" class="result-list"></div>
+      </section>
+    </section>
+    <p id="statsError" class="error-message" hidden></p>
+  </main>
+  <script src="./stats.js" defer></script>
+</body>
+</html>

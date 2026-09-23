@@ -13,6 +13,10 @@ against the real reference audio, saves each answer in the browser's
 responses can be exported as JSON and sent to the survey owner for manual
 import and aggregation.
 
+The V2 survey uses the edited-full synthesis set and all 30 paired samples:
+open [`survey_v2/index.html`](survey_v2/index.html) for the questionnaire or
+[`survey_v2/stats.html`](survey_v2/stats.html) for local aggregation.
+
 ## Repository Layout
 
 - `tagger/`: core schemas, tag tools, and pipelines.
