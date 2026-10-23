@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8fafb" />
+    <title>SURE-Tagger · Interactive demo</title>
+    <link rel="icon" href="../../assets/readme/three-layer-audio-metadata-tag.png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand" href="https://github.com/PigeonDan1/sure-tagger/blob/docs/bilingual-readme/README.md" aria-label="SURE-Tagger README">
+          <img src="../../assets/readme/three-layer-audio-metadata-tag.png" alt="" />
+          <span>SURE-Tagger</span>
+        </a>
+        <div class="header-actions">
+          <a class="readme-link" href="https://github.com/PigeonDan1/sure-tagger/blob/docs/bilingual-readme/README.md" id="readmeLink">README ↗</a>
+          <div class="language-switch" role="group" aria-label="Language">
+            <button type="button" data-language="en" aria-pressed="true">EN</button>
+            <button type="button" data-language="zh" aria-pressed="false">中文</button>
+          </div>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="heroTitle">
+          <div class="hero-copy">
+            <p class="eyebrow" data-i18n="heroEyebrow">Interactive demo · curated audio</p>
+            <h1 id="heroTitle" data-i18n="heroTitle">From speech evidence to useful tags.</h1>
+            <p class="hero-lead" data-i18n="heroLead">Listen to a real clip, inspect the structured fields and descriptions, then combine tags to find comparable recordings.</p>
+            <div class="hero-pills" aria-label="Demo scope">
+              <span data-i18n="heroPillOne">5 audio clips</span>
+              <span data-i18n="heroPillTwo">3 prediction sources</span>
+              <span data-i18n="heroPillThree">Tag-driven queries</span>
+            </div>
+          </div>
+          <div class="hero-mark" aria-hidden="true">
+            <span class="mark-wave"></span>
+            <span class="mark-arrow">→</span>
+            <span class="mark-tags">{ tags }</span>
+          </div>
+        </section>
+
+        <section class="section" id="listen" aria-labelledby="listenTitle">
+          <div class="section-title">
+            <span class="section-number">01</span>
+            <div>
+              <p class="eyebrow" data-i18n="listenEyebrow">Listen</p>
+              <h2 id="listenTitle" data-i18n="listenTitle">Choose a recording</h2>
+              <p data-i18n="listenLead">Listen to each clip and inspect its saved predictions.</p>
+            </div>
+          </div>
+          <div class="explorer">
+            <div class="sample-rail" id="sampleList" aria-label="Audio samples"></div>
+            <article class="player-panel">
+              <div class="player-heading">
+                <div>
+                  <p class="eyebrow" id="activeDataset"></p>
+                  <h3 id="activeTitle"></h3>
+                  <p class="sample-focus" id="activeFocus"></p>
+                </div>
+                <span class="track-badge" id="activeTrack"></span>
+              </div>
+              <audio id="audioPlayer" controls preload="metadata"></audio>
+              <div class="player-links">
+                <a id="audioLink" target="_blank" rel="noopener" data-i18n="openAudio">Open audio ↗</a>
+                <a id="predictionsLink" target="_blank" rel="noopener" data-i18n="openPredictions">Full predictions ↗</a>
+              </div>
+              <div class="fact-grid" id="quickFacts"></div>
+              <div class="transcript-panel">
+                <p class="eyebrow" data-i18n="transcriptLabel">ASR transcript</p>
+                <p id="transcriptText"></p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="tags" aria-labelledby="tagsTitle">
+          <div class="section-title">
+            <span class="section-number">02</span>
+            <div>
+              <p class="eyebrow" data-i18n="tagsEyebrow">Representation</p>
+              <h2 id="tagsTitle" data-i18n="tagsTitle">What the tags say</h2>
+              <p data-i18n="tagsLead">Typed fields make conditions queryable. A short description preserves context; unknown values stay unknown.</p>
+            </div>
+          </div>
+          <div class="tag-grid" id="tagGrid"></div>
+          <div class="description-strip">
+            <div class="description-heading">
+              <span class="description-dot"></span>
+              <span data-i18n="tagDescription">Evidence-linked description</span>
+            </div>
+            <p id="tagCaption"></p>
+          </div>
+          <details class="data-details">
+            <summary data-i18n="showJson">View complete SURE-Tagger JSON</summary>
+            <pre id="rawJson"></pre>
+          </details>
+        </section>
+
+        <section class="section" id="query" aria-labelledby="queryTitle">
+          <div class="section-title">
+            <span class="section-number">03</span>
+            <div>
+              <p class="eyebrow" data-i18n="queryEyebrow">Compose conditions</p>
+              <h2 id="queryTitle" data-i18n="queryTitle">Find a speech scene</h2>
+              <p data-i18n="queryLead">Combine tag values to make a small, comparable subset. This preview does not compute ASR error rates.</p>
+            </div>
+          </div>
+          <div class="query-panel">
+            <div class="query-fields">
+              <label><span data-i18n="speakerFilter">Speakers</span><select id="speakerFilter"></select></label>
+              <label><span data-i18n="overlapFilter">Overlap</span><select id="overlapFilter"></select></label>
+              <label><span data-i18n="languageFilter">Language</span><select id="languageFilter"></select></label>
+              <label><span data-i18n="noiseFilter">External noise tag</span><select id="noiseFilter"></select></label>
+            </div>
+            <div class="query-result-header">
+              <strong id="matchCount"></strong>
+              <button type="button" class="text-button" id="clearFilters" data-i18n="clearFilters">Clear filters</button>
+            </div>
+            <div class="query-results" id="queryResults" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <section class="section" id="compare" aria-labelledby="compareTitle">
+          <div class="section-title">
+            <span class="section-number">04</span>
+            <div>
+              <p class="eyebrow" data-i18n="compareEyebrow">Same audio</p>
+              <h2 id="compareTitle" data-i18n="compareTitle">Compare descriptions</h2>
+              <p data-i18n="compareLead">Read each system's output for the selected clip. Differences are visible without hiding the full records.</p>
+            </div>
+          </div>
+          <div class="comparison-grid" id="comparisonGrid"></div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <p data-i18n="footerCaveat">These clips are examples, not a performance summary. Some labels are uncertain or disagree with the available references.</p>
+        <div class="footer-links">
+          <a href="https://github.com/me-chuan/sure-tagger/blob/main/assets/readme/tagbench/README.md" data-i18n="sourceLink">Samples and references ↗</a>
+          <a href="https://github.com/me-chuan/sure-tagger/blob/main/assets/readme/tagbench/ATTRIBUTION.md" data-i18n="attributionLink">Audio attribution ↗</a>
+          <a href="https://github.com/me-chuan/sure-tagger/blob/main/sure-tagger-main/demo/README.md" data-i18n="usageLink">Run this demo ↗</a>
+        </div>
+      </footer>
+    </div>
+    <script src="fixture-data.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
