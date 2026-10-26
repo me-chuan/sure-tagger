@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#f8fafb" />
+    <meta name="theme-color" content="#0b1633" />
     <title>SURE-Tagger · Interactive demo</title>
     <link rel="icon" href="../../assets/readme/three-layer-audio-metadata-tag.png" />
-    <link rel="stylesheet" href="styles.css?v=tagbench-10" />
+    <link rel="stylesheet" href="styles.css?v=acoustic-lab-1" />
   </head>
   <body>
     <div class="page-shell">
@@ -15,6 +15,12 @@
           <img src="../../assets/readme/three-layer-audio-metadata-tag.png" alt="" />
           <span>SURE-Tagger</span>
         </a>
+        <nav class="chapter-nav" aria-label="Demo sections">
+          <a href="#listen" data-i18n="navListen">Listen</a>
+          <a href="#tags" data-i18n="navTags">Tags</a>
+          <a href="#query" data-i18n="navQuery">Query</a>
+          <a href="#compare" data-i18n="navCompare">Compare</a>
+        </nav>
         <div class="header-actions">
           <a class="readme-link" href="https://github.com/PigeonDan1/sure-tagger/blob/docs/bilingual-readme/README.md" id="readmeLink">README ↗</a>
           <div class="language-switch" role="group" aria-label="Language">
@@ -30,16 +36,33 @@
             <p class="eyebrow" data-i18n="heroEyebrow">Interactive demo · curated audio</p>
             <h1 id="heroTitle" data-i18n="heroTitle">From speech evidence to useful tags.</h1>
             <p class="hero-lead" data-i18n="heroLead">Listen to recorded and synthetic clips, inspect the structured fields and descriptions, then combine tags to find comparable scenes.</p>
+            <div class="hero-actions">
+              <a class="primary-action" href="#listen" data-i18n="heroAction">Start listening</a>
+              <a class="secondary-action" href="#tags" data-i18n="heroSecondary">Explore tags</a>
+            </div>
             <div class="hero-pills" aria-label="Demo scope">
               <span data-i18n="heroPillOne">10 audio clips</span>
-              <span data-i18n="heroPillTwo">3 prediction sources</span>
-              <span data-i18n="heroPillThree">Tag-driven queries</span>
+              <span data-i18n="heroPillTwo">5 recorded + 5 synthetic</span>
+              <span data-i18n="heroPillThree">3 prediction sources</span>
             </div>
           </div>
-          <div class="hero-mark" aria-hidden="true">
-            <span class="mark-wave"></span>
-            <span class="mark-arrow">→</span>
-            <span class="mark-tags">{ tags }</span>
+          <div class="hero-visual" aria-hidden="true">
+            <div class="signal-panel">
+              <div class="signal-topline"><span>RAW AUDIO</span><span>23.72 S</span></div>
+              <div class="signal-wave">
+                <span></span><span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <div class="signal-footer"><span>SPEECH EVIDENCE</span><span>16 KHZ · MONO</span></div>
+            </div>
+            <div class="transform-line"><span></span><b>→</b><span></span></div>
+            <div class="tag-stack">
+              <div><code>speaker_count</code><strong>4</strong></div>
+              <div><code>language</code><strong>en</strong></div>
+              <div><code>overlap</code><strong>true</strong></div>
+            </div>
           </div>
         </section>
 
@@ -149,7 +172,7 @@
         </div>
       </footer>
     </div>
-    <script src="fixture-data.js?v=tagbench-10"></script>
-    <script src="app.js?v=tagbench-10"></script>
+    <script src="fixture-data.js?v=acoustic-lab-1"></script>
+    <script src="app.js?v=acoustic-lab-1"></script>
   </body>
 </html>

@@ -6,9 +6,16 @@
       heroEyebrow: "Interactive demo · curated audio",
       heroTitle: "From speech evidence to useful tags.",
       heroLead: "Listen to recorded and synthetic clips, inspect the structured fields and descriptions, then combine tags to find comparable scenes.",
+      heroAction: "Start listening",
+      heroSecondary: "Explore tags",
       heroPillOne: "10 audio clips",
-      heroPillTwo: "3 prediction sources",
-      heroPillThree: "Tag-driven queries",
+      heroPillTwo: "5 recorded + 5 synthetic",
+      heroPillThree: "3 prediction sources",
+      tagDrivenQueries: "Tag-driven queries",
+      navListen: "Listen",
+      navTags: "Tags",
+      navQuery: "Query",
+      navCompare: "Compare",
       listenEyebrow: "Listen",
       listenTitle: "Choose a recording",
       listenLead: "Explore five recorded clips and five controlled synthetic scenes.",
@@ -85,9 +92,16 @@
       heroEyebrow: "交互演示 · 精选音频",
       heroTitle: "从语音证据到可用的标签。",
       heroLead: "试听真实与合成片段，查看结构字段与描述，再组合标签寻找可比较的语音场景。",
+      heroAction: "开始试听",
+      heroSecondary: "查看标签",
       heroPillOne: "10 条音频",
-      heroPillTwo: "3 个预测来源",
-      heroPillThree: "标签组合查询",
+      heroPillTwo: "5 条真实录音 + 5 条合成场景",
+      heroPillThree: "3 个预测来源",
+      tagDrivenQueries: "标签组合查询",
+      navListen: "试听",
+      navTags: "标签",
+      navQuery: "筛选",
+      navCompare: "对比",
       listenEyebrow: "试听",
       listenTitle: "选择一段录音",
       listenLead: "试听五条真实录音和五条受控合成场景。",
@@ -238,6 +252,7 @@
     if (!bundledSource) {
       document.querySelector('[data-i18n="heroEyebrow"]').textContent = tr("localEyebrow");
       document.querySelector('[data-i18n="heroPillTwo"]').textContent = tr("oneTagSource");
+      document.querySelector('[data-i18n="heroPillThree"]').textContent = tr("tagDrivenQueries");
       document.querySelector('[data-i18n="footerCaveat"]').textContent = tr("localCaveat");
     }
     byId("readmeLink").href =
